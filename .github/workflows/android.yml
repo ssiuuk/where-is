@@ -1,0 +1,172 @@
+name: Build Android App
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'app/**'
+      - '.github/workflows/android.yml'
+  pull_request:
+    paths:
+      - 'app/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Attach the built app to this existing release'
+        required: false
+  # publishing a release builds the app and attaches it to the release
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Choose the release
+        id: release
+        working-directory: .
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.release_tag }}
+        run: |
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          if [ -n "$RELEASE_TAG" ]; then
+            # a tag such as v1.2.0 becomes the version name 1.2.0
+            echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.1.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.release.outputs.tag || github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck and test
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Prepare signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is not set, the app is signed with a temporary key and each new build has to be installed fresh"
+          fi
+
+      - name: Generate the Android project
+        env:
+          APP_VERSION_CODE: ${{ github.run_number }}
+          APP_VERSION_NAME: ${{ steps.release.outputs.version }}
+          # the server's host name, so label links open the app directly (optional)
+          WHEREIS_HOST: ${{ vars.WHEREIS_HOST }}
+          CI: '1'
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Build
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        working-directory: app/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/where-is-android.apk"
+
+      - name: Upload app
+        uses: actions/upload-artifact@v7
+        with:
+          name: where-is-android
+          path: ${{ runner.temp }}/where-is-android.apk
+
+      - name: Publish to the android-latest release
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.release.outputs.tag == ''
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if ! gh release view android-latest > /dev/null 2>&1; then
+            gh release create android-latest --prerelease --target "$GITHUB_SHA" \
+              --title "Android app (latest build)" \
+              --notes "Open this page on your Android phone and download where-is-android.apk to install or update the app."
+          fi
+          gh release upload android-latest "$RUNNER_TEMP/where-is-android.apk" --clobber
+
+      - name: Attach to the release
+        if: steps.release.outputs.tag != ''
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/where-is-android.apk" --clobber
+
+      # testers get each release through Firebase App Distribution once FIREBASE_APP_ID and FIREBASE_SERVICE_ACCOUNT are set
+      - name: Send to Firebase App Distribution
+        if: steps.release.outputs.tag != ''
+        working-directory: .
+        env:
+          FIREBASE_APP_ID: ${{ vars.FIREBASE_APP_ID }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_TESTER_GROUPS: ${{ vars.FIREBASE_TESTER_GROUPS || 'testers' }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_NOTES: ${{ github.event.release.body }}
+        run: |
+          if [ -z "$FIREBASE_APP_ID" ] || [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::notice::FIREBASE_APP_ID or FIREBASE_SERVICE_ACCOUNT is not set, so the release is not sent to Firebase App Distribution"
+            exit 0
+          fi
+          echo "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase.json"
+          printf '%s\n' "${RELEASE_NOTES:-Where Is $RELEASE_TAG}" > "$RUNNER_TEMP/release-notes.txt"
+          npx --yes firebase-tools@13.29.1 appdistribution:distribute "$RUNNER_TEMP/where-is-android.apk" \
+            --app "$FIREBASE_APP_ID" \
+            --groups "$FIREBASE_TESTER_GROUPS" \
+            --release-notes-file "$RUNNER_TEMP/release-notes.txt"
+          rm -f "$RUNNER_TEMP/firebase.json"
+
+      - name: Publish to the android-preview release
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if ! gh release view android-preview > /dev/null 2>&1; then
+            gh release create android-preview --prerelease --target "${{ github.event.pull_request.head.sha }}" \
+              --title "Android app (preview of an open pull request)" \
+              --notes "A test build from a pull request that isn't merged yet. Install it to try the changes; the latest build of main is under \"Android app (latest build)\"."
+          fi
+          cp "$RUNNER_TEMP/where-is-android.apk" "$RUNNER_TEMP/where-is-android-preview.apk"
+          gh release upload android-preview "$RUNNER_TEMP/where-is-android-preview.apk" --clobber
