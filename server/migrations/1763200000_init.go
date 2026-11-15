@@ -51,6 +51,9 @@ func init() {
 		users.UpdateRule = types.Pointer(userSelfRule + ` && ` + noHousehold)
 		users.OAuth2.MappedFields.Name = "name"
 		users.OAuth2.MappedFields.AvatarURL = "avatar"
+		// item photos are protected files: the app fetches a file token (valid
+		// for an hour) and adds it to photo URLs, so a copied link soon stops working
+		users.FileToken.Duration = 3600
 		if err := app.Save(users); err != nil {
 			return err
 		}
@@ -83,6 +86,7 @@ func init() {
 			&core.TextField{Name: "note", Max: 2000},
 			&core.FileField{
 				Name:      "photo",
+				Protected: true, // only household members, with a file token, can download it
 				MaxSelect: 1,
 				MaxSize:   10 << 20,
 				MimeTypes: []string{"image/jpeg", "image/png", "image/webp", "image/heic"},

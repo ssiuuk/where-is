@@ -89,6 +89,9 @@ export function DataProvider({ pb, household, children }: { pb: PocketBase; hous
   const [members, setMembers] = useState<Member[]>([]);
   const [carrying, setCarrying] = useState('');
   const loaded = useRef(false);
+  // photos are protected files: their URLs need a short-lived file token
+  const [fileToken, setFileToken] = useState('');
+  const fileTokenAt = useRef(0);
 
   // show what we had last time straight away
   useEffect(() => {
@@ -180,10 +183,36 @@ export function DataProvider({ pb, household, children }: { pb: PocketBase; hous
     },
     [members],
   );
+  // the server's file tokens last an hour; get a new one well before that
+  const renewFileToken = useCallback(async () => {
+    if (Date.now() - fileTokenAt.current < 45 * 60_000) return;
+    try {
+      const token = await pb.files.getToken();
+      fileTokenAt.current = Date.now();
+      setFileToken(token);
+    } catch {
+      // offline: photos show again once the server can be reached
+    }
+  }, [pb]);
+  useEffect(() => {
+    renewFileToken();
+    const timer = setInterval(renewFileToken, 5 * 60_000);
+    const appState = AppState.addEventListener('change', (s) => {
+      if (s === 'active') renewFileToken();
+    });
+    return () => {
+      clearInterval(timer);
+      appState.remove();
+    };
+  }, [renewFileToken]);
+
   const photoUrl = useCallback(
-    (item: Item, thumb?: '200x200' | '800x0') =>
-      item.photo ? pb.files.getURL({ id: item.id, collectionId: item.collectionId, collectionName: 'items' }, item.photo, thumb ? { thumb } : undefined) : '',
-    [pb],
+    (item: Item, thumb?: '200x200' | '800x0') => {
+      if (!item.photo || !fileToken) return '';
+      const record = { id: item.id, collectionId: item.collectionId, collectionName: 'items' };
+      return pb.files.getURL(record, item.photo, { token: fileToken, ...(thumb ? { thumb } : {}) });
+    },
+    [pb, fileToken],
   );
 
   const addItem = useCallback<Data['addItem']>(

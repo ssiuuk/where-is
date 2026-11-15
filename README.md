@@ -101,13 +101,13 @@ The app and the web version show **Continue with Google** as soon as the server 
 
 Anyone who can reach the server can create an account, but an account sees nothing until it joins a household with that household's invite code. A wrong code is rate-limited. To stop new accounts entirely, open the dashboard, go to Collections → users → API Rules and set the **Create** rule to superusers only. Then create each person's account in the dashboard.
 
-Every household's places, items and history are only visible to its members. A person belongs to one household at a time: to switch, they leave in Settings first. Who moved an item and when is always set by the server, and an item's move and its history entry are saved together or not at all. This is enforced by the server's API rules (see `server/migrations`) and covered by the tests in `server/whereis_test.go`.
+Every household's places, items and history are only visible to its members. A person belongs to one household at a time: to switch, they leave in Settings first. Item photos are protected files: they are only served with a short-lived file token that the server gives to signed-in members of that household, so a copied photo link stops working within the hour. Who moved an item and when is always set by the server, and an item's move and its history entry are saved together or not at all. This is enforced by the server's API rules (see `server/migrations`) and covered by the tests in `server/whereis_test.go`.
 
 ## Labels
 
 - **QR:** open a place (or item) → **Label** → **Save or share label image**, then print it. Plain paper and tape work; laminated or vinyl labels last longer in a garage or loft.
 - **NFC:** buy blank NTAG213/215/216 stickers (about £0.20–0.40 each), open **Label** → **Write NFC sticker**, and hold the phone against the sticker. On metal shelves, use stickers made for metal ("anti-metal").
-- A label holds a link like `https://whereis.example.com/p/<id>`. It shows nothing to anyone outside your household.
+- A label holds a link like `https://whereis.example.com/p/<id>`. It shows nothing to anyone outside your household. The app only accepts labels from the server it is signed in to (plus `whereis://` links on NFC stickers).
 
 ## Develop
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
+	"github.com/pocketbase/pocketbase/tools/filesystem"
 )
 
 // fixture holds the records every scenario starts from: two households,
@@ -584,4 +585,50 @@ func TestMembersCantSwitchHouseholdsByJoining(t *testing.T) {
 	if c, _ := f.app.FindRecordById("users", f.cat.Id); c.GetString("household") != f.h2.Id {
 		t.Fatal("cat switched households")
 	}
+}
+
+func TestPhotosArePrivate(t *testing.T) {
+	f := newFixture(t)
+	defer f.app.Cleanup()
+
+	file, err := filesystem.NewFileFromBytes([]byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?\x03\x00\x08\xfc\x02\xfe\xa7\x9a\xa0\xa0\x00\x00\x00\x00IEND\xaeB`\x82"), "drill.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.drill.Set("photo", file)
+	if err := f.app.Save(f.drill); err != nil {
+		t.Fatal(err)
+	}
+	url := "/api/files/items/" + f.drill.Id + "/" + f.drill.GetString("photo")
+	fileToken := func(u *core.Record) string {
+		tok, err := u.NewFileToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
+	}
+
+	run(t, f, tests.ApiScenario{
+		Name: "no token", Method: http.MethodGet, URL: url,
+		ExpectedStatus: 404,
+	})
+	run(t, f, tests.ApiScenario{
+		Name: "auth header alone isn't enough", Method: http.MethodGet, URL: url,
+		Headers:        map[string]string{"Authorization": token(t, f.ben)},
+		ExpectedStatus: 404,
+	})
+	run(t, f, tests.ApiScenario{
+		Name: "other household's file token", Method: http.MethodGet, URL: url + "?token=" + fileToken(f.cat),
+		ExpectedStatus: 404,
+	})
+	run(t, f, tests.ApiScenario{
+		Name: "member's file token", Method: http.MethodGet, URL: url + "?token=" + fileToken(f.ben),
+		ExpectedStatus:  200,
+		ExpectedContent: []string{"PNG"},
+	})
+	run(t, f, tests.ApiScenario{
+		Name: "member's thumbnail", Method: http.MethodGet, URL: url + "?thumb=200x200&token=" + fileToken(f.ben),
+		ExpectedStatus:  200,
+		ExpectedContent: []string{"PNG"},
+	})
 }
