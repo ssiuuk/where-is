@@ -52,7 +52,7 @@ Then keep the key where only reviewed code can use it:
 
 Keep the `.jks` file somewhere safe and never commit it.
 
-The workflows are split by trust: pull request jobs get a read-only token and no secrets, and only the `release` job (pushes to `main`, published releases and manual runs) gets write access and the `release` environment.
+The workflows are split by trust: pull request jobs get a read-only token and no secrets, and only the `release` job gets write access and the `release` environment. The workflow itself only lets that job run for pushes to `main`, published releases, and manual runs started from `main` (with an optional `v*` release tag), so the environment rules are a second layer.
 
 ### Labels that open the app directly (optional)
 

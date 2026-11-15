@@ -59,7 +59,14 @@ jobs:
           path: ${{ runner.temp }}/where-is-android.apk
 
   release:
-    if: github.event_name != 'pull_request'
+    # Only reviewed code gets the signing key: pushes to main, published
+    # releases, and manual runs started from main (optionally for a v* tag).
+    # The "release" environment's branch and tag rules are a second layer.
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      github.event_name == 'release' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+        (github.event.inputs.release_tag == '' || startsWith(github.event.inputs.release_tag, 'v')))
     runs-on: ubuntu-latest
     # protect this environment (Settings > Environments) so only main and release tags can use its secrets
     environment: release
