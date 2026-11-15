@@ -20,11 +20,8 @@ on:
       - 'app/**'
       - '.github/workflows/android.yml'
       - '.github/actions/build-android/**'
+  # a manual run builds main and updates "Android app (latest build)"
   workflow_dispatch:
-    inputs:
-      release_tag:
-        description: 'Attach the built app to this existing release'
-        required: false
   # publishing a release builds the app and attaches it to the release
   release:
     types:
@@ -59,14 +56,14 @@ jobs:
           path: ${{ runner.temp }}/where-is-android.apk
 
   release:
-    # Only reviewed code gets the signing key: pushes to main, published
-    # releases, and manual runs started from main (optionally for a v* tag).
-    # The "release" environment's branch and tag rules are a second layer.
+    # Only reviewed code gets the signing key: main (pushes and manual runs)
+    # and published releases. The code built is always the ref the run is
+    # for (github.ref), so the "release" environment's branch and tag rules
+    # check exactly what gets signed.
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-      github.event_name == 'release' ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
-        (github.event.inputs.release_tag == '' || startsWith(github.event.inputs.release_tag, 'v')))
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'release' && startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     # protect this environment (Settings > Environments) so only main and release tags can use its secrets
     environment: release
@@ -76,7 +73,7 @@ jobs:
       - name: Choose the release
         id: release
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.release_tag }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           if [ -n "$RELEASE_TAG" ]; then
@@ -89,7 +86,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ steps.release.outputs.tag || github.ref }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Build

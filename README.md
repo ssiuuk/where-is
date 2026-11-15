@@ -24,7 +24,7 @@ When someone scans a label with their phone's own camera, the link opens the pla
 
 ## Install the app (Android)
 
-1. Every push to `main` that changes the app builds it with GitHub Actions (workflow **Build Android App**, which can also be started by hand from the Actions tab).
+1. Every push to `main` that changes the app builds it with GitHub Actions (workflow **Build Android App**, which can also be started by hand from the Actions tab to rebuild `main`).
 2. On your phone, open the repository's **Releases** page, open **Android app (latest build)** and download `where-is-android.apk`.
 3. Open the downloaded file and allow your browser to install apps when Android asks.
 4. Open Where Is, enter your server address (for example `whereis.example.com`) and sign in with Google or with an email and password.
@@ -52,7 +52,7 @@ Then keep the key where only reviewed code can use it:
 
 Keep the `.jks` file somewhere safe and never commit it.
 
-The workflows are split by trust: pull request jobs get a read-only token and no secrets, and only the `release` job gets write access and the `release` environment. The workflow itself only lets that job run for pushes to `main`, published releases, and manual runs started from `main` (with an optional `v*` release tag), so the environment rules are a second layer.
+The workflows are split by trust: pull request jobs get a read-only token and no secrets, and only the `release` job gets write access and the `release` environment. The workflow itself only lets that job run for `main` (pushes and manual runs) and published `v*` releases, and it always builds the exact commit the run is for, so the environment rules check what actually gets signed.
 
 ### Labels that open the app directly (optional)
 
