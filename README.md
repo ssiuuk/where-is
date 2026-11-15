@@ -30,7 +30,9 @@ When someone scans a label with their phone's own camera, the link opens the pla
 4. Open Where Is, enter your server address (for example `whereis.example.com`) and sign in with Google or with an email and password.
 5. The first person creates the household. Everyone else joins with the invite code from **Settings → Invite your family**.
 
-Publishing a release (for example with the tag `v1.2.0`) builds the app from that tag, names the version after it (`1.2.0`) and attaches `where-is-android.apk` to the release. Pull requests that change the app publish a test build to the **Android app (preview of an open pull request)** release.
+Publishing a release (for example with the tag `v1.2.0`) builds the app from that tag, names the version after it (`1.2.0`) and attaches `where-is-android.apk` to the release.
+
+Pull requests that change the app get a test build of their own, the release **Android app (preview of pull request #N)** (tag `android-pr-N`). It is deleted when the pull request is closed. Pull request builds never see the signing key, so a preview is signed with a temporary key: uninstall the regular app before installing one. Previews are published by the workflow on `main`, so they start once this setup is merged.
 
 ### Signing, so updates install over the old version
 
@@ -43,7 +45,14 @@ keytool -genkeypair -v -keystore where-is.jks -alias where-is -keyalg RSA -keysi
 base64 -w0 where-is.jks   # on macOS: base64 -i where-is.jks
 ```
 
-Then add these repository secrets under Settings > Secrets and variables > Actions: `ANDROID_KEYSTORE_BASE64` (the base64 text), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` (`where-is`) and `ANDROID_KEY_PASSWORD`. Keep the `.jks` file somewhere safe and never commit it.
+Then keep the key where only reviewed code can use it:
+
+1. Under Settings > Environments, create an environment named `release`. Under **Deployment branches and tags**, choose **Selected branches and tags** and add the branch `main` and the tag pattern `v*`. Optionally add yourself as a required reviewer, so every signed build waits for your approval.
+2. In that environment, add the secrets `ANDROID_KEYSTORE_BASE64` (the base64 text), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` (`where-is`) and `ANDROID_KEY_PASSWORD`. Don't add them as repository secrets, which every workflow can read.
+
+Keep the `.jks` file somewhere safe and never commit it.
+
+The workflows are split by trust: pull request jobs get a read-only token and no secrets, and only the `release` job (pushes to `main`, published releases and manual runs) gets write access and the `release` environment.
 
 ### Labels that open the app directly (optional)
 
@@ -59,7 +68,7 @@ To skip that page:
 
 This works the same way as in ezbookkeeping-android. Publishing a release also sends the app to Firebase App Distribution once these are set:
 - the variable `FIREBASE_APP_ID`, for an Android app with the package name `com.ssiuuk.whereis`;
-- the secret `FIREBASE_SERVICE_ACCOUNT`, a service account with the Firebase App Distribution Admin role;
+- the secret `FIREBASE_SERVICE_ACCOUNT` in the `release` environment, a service account with the Firebase App Distribution Admin role;
 - optionally the variable `FIREBASE_TESTER_GROUPS` (default `testers`).
 
 Until both settings exist, the step is skipped.
@@ -92,7 +101,7 @@ The app and the web version show **Continue with Google** as soon as the server 
 
 Anyone who can reach the server can create an account, but an account sees nothing until it joins a household with that household's invite code. A wrong code is rate-limited. To stop new accounts entirely, open the dashboard, go to Collections → users → API Rules and set the **Create** rule to superusers only. Then create each person's account in the dashboard.
 
-Every household's places, items and history are only visible to its members. This is enforced by the server's API rules (see `server/migrations`) and covered by the tests in `server/whereis_test.go`.
+Every household's places, items and history are only visible to its members. A person belongs to one household at a time: to switch, they leave in Settings first. Who moved an item and when is always set by the server, and an item's move and its history entry are saved together or not at all. This is enforced by the server's API rules (see `server/migrations`) and covered by the tests in `server/whereis_test.go`.
 
 ## Labels
 

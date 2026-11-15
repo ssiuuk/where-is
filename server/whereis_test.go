@@ -1,6 +1,9 @@
 package main
 
 import (
+	"errors"
+
+	"github.com/pocketbase/dbx"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -440,5 +443,145 @@ func TestGoogleSignInFromEnv(t *testing.T) {
 	users, _ := f.app.FindCollectionByNameOrId("users")
 	if len(users.OAuth2.Providers) != 1 {
 		t.Fatalf("want 1 provider, got %d", len(users.OAuth2.Providers))
+	}
+}
+
+func countMoves(t *testing.T, f *fixture, item string) int {
+	t.Helper()
+	n, err := f.app.CountRecords("moves", dbx.HashExp{"item": item})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return int(n)
+}
+
+func TestMoveStampIsServerOnly(t *testing.T) {
+	f := newFixture(t)
+	defer f.app.Cleanup()
+
+	run(t, f, tests.ApiScenario{
+		Name: "can't forge who moved an item", Method: http.MethodPatch,
+		URL:            "/api/collections/items/records/" + f.drill.Id,
+		Headers:        map[string]string{"Authorization": token(t, f.ann)},
+		Body:           strings.NewReader(`{"place":"` + f.shelf.Id + `","moved_by":"` + f.ben.Id + `"}`),
+		ExpectedStatus: 404,
+	})
+	run(t, f, tests.ApiScenario{
+		Name: "can't backdate a move", Method: http.MethodPatch,
+		URL:            "/api/collections/items/records/" + f.drill.Id,
+		Headers:        map[string]string{"Authorization": token(t, f.ann)},
+		Body:           strings.NewReader(`{"name":"Drill","moved_at":"2020-01-01 00:00:00.000Z"}`),
+		ExpectedStatus: 404,
+	})
+	run(t, f, tests.ApiScenario{
+		Name: "can't create an item with a forged mover", Method: http.MethodPost,
+		URL:            "/api/collections/items/records",
+		Headers:        map[string]string{"Authorization": token(t, f.ann)},
+		Body:           strings.NewReader(`{"household":"` + f.h1.Id + `","name":"Saw","moved_by":"` + f.ben.Id + `"}`),
+		ExpectedStatus: 400,
+	})
+	d, _ := f.app.FindRecordById("items", f.drill.Id)
+	if d.GetString("place") != f.garage.Id || d.GetString("moved_by") != "" || countMoves(t, f, f.drill.Id) != 0 {
+		t.Fatalf("rejected requests changed the drill: place=%s moved_by=%s", d.GetString("place"), d.GetString("moved_by"))
+	}
+}
+
+func TestMoveFailsWhenHistoryFails(t *testing.T) {
+	f := newFixture(t)
+	defer f.app.Cleanup()
+	f.app.OnRecordCreate("moves").BindFunc(func(e *core.RecordEvent) error {
+		return errors.New("disk full")
+	})
+	run(t, f, tests.ApiScenario{
+		Name: "move is refused", Method: http.MethodPatch,
+		URL:            "/api/collections/items/records/" + f.drill.Id,
+		Headers:        map[string]string{"Authorization": token(t, f.ann)},
+		Body:           strings.NewReader(`{"place":"` + f.shelf.Id + `"}`),
+		ExpectedStatus: 400,
+	})
+	d, _ := f.app.FindRecordById("items", f.drill.Id)
+	if d.GetString("place") != f.garage.Id {
+		t.Fatal("the item moved although its history wasn't saved")
+	}
+}
+
+func TestBulkMove(t *testing.T) {
+	f := newFixture(t)
+	defer f.app.Cleanup()
+	saw := f.save(t, "items", map[string]any{"household": f.h1.Id, "name": "Saw"})
+	theirs := f.save(t, "items", map[string]any{"household": f.h2.Id, "name": "Their hammer"})
+
+	run(t, f, tests.ApiScenario{
+		Name: "one foreign item moves nothing", Method: http.MethodPost,
+		URL:             "/api/whereis/move",
+		Headers:         map[string]string{"Authorization": token(t, f.ann)},
+		Body:            strings.NewReader(`{"items":["` + f.drill.Id + `","` + theirs.Id + `"],"place":"` + f.shelf.Id + `"}`),
+		ExpectedStatus:  404,
+		ExpectedContent: []string{"Nothing was moved"},
+	})
+	if d, _ := f.app.FindRecordById("items", f.drill.Id); d.GetString("place") != f.garage.Id || countMoves(t, f, f.drill.Id) != 0 {
+		t.Fatal("a failed bulk move changed the drill")
+	}
+	run(t, f, tests.ApiScenario{
+		Name: "place in another household", Method: http.MethodPost,
+		URL:            "/api/whereis/move",
+		Headers:        map[string]string{"Authorization": token(t, f.cat)},
+		Body:           strings.NewReader(`{"items":["` + theirs.Id + `"],"place":"` + f.shelf.Id + `"}`),
+		ExpectedStatus: 400,
+	})
+	run(t, f, tests.ApiScenario{
+		Name: "all move together", Method: http.MethodPost,
+		URL:             "/api/whereis/move",
+		Headers:         map[string]string{"Authorization": token(t, f.ben)},
+		Body:            strings.NewReader(`{"items":["` + f.drill.Id + `","` + saw.Id + `"],"place":"` + f.shelf.Id + `"}`),
+		ExpectedStatus:  200,
+		ExpectedContent: []string{`"name":"Drill"`, `"name":"Saw"`, `"moved_by":"` + f.ben.Id + `"`},
+	})
+	for _, id := range []string{f.drill.Id, saw.Id} {
+		r, _ := f.app.FindRecordById("items", id)
+		if r.GetString("place") != f.shelf.Id || countMoves(t, f, id) != 1 {
+			t.Fatalf("%s not moved with history", r.GetString("name"))
+		}
+	}
+	m, _ := f.app.FindFirstRecordByData("moves", "item", saw.Id)
+	if m.GetString("to_name") != "Garage › Shelf 3" {
+		t.Fatalf("to_name = %q", m.GetString("to_name"))
+	}
+	run(t, f, tests.ApiScenario{
+		Name: "no household", Method: http.MethodPost,
+		URL:            "/api/whereis/move",
+		Headers:        map[string]string{"Authorization": token(t, f.dan)},
+		Body:           strings.NewReader(`{"items":["` + saw.Id + `"],"place":""}`),
+		ExpectedStatus: 400,
+	})
+}
+
+func TestMembersCantSwitchHouseholdsByJoining(t *testing.T) {
+	f := newFixture(t)
+	defer f.app.Cleanup()
+	run(t, f, tests.ApiScenario{
+		Name: "member of h2 joins h1", Method: http.MethodPost,
+		URL:             "/api/whereis/join",
+		Headers:         map[string]string{"Authorization": token(t, f.cat)},
+		Body:            strings.NewReader(`{"code":"ABCD-2345"}`),
+		ExpectedStatus:  400,
+		ExpectedContent: []string{"Leave it in Settings"},
+	})
+	run(t, f, tests.ApiScenario{
+		Name: "rejoining own household is fine", Method: http.MethodPost,
+		URL:            "/api/whereis/join",
+		Headers:        map[string]string{"Authorization": token(t, f.ann)},
+		Body:           strings.NewReader(`{"code":"ABCD-2345"}`),
+		ExpectedStatus: 200,
+	})
+	run(t, f, tests.ApiScenario{
+		Name: "member can't create a second household", Method: http.MethodPost,
+		URL:            "/api/whereis/households",
+		Headers:        map[string]string{"Authorization": token(t, f.cat)},
+		Body:           strings.NewReader(`{"name":"Second"}`),
+		ExpectedStatus: 400,
+	})
+	if c, _ := f.app.FindRecordById("users", f.cat.Id); c.GetString("household") != f.h2.Id {
+		t.Fatal("cat switched households")
 	}
 }

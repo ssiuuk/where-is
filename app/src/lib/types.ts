@@ -40,6 +40,9 @@ export type Move = {
   item: string;
   from_place: string;
   to_place: string;
+  /** place paths when the move happened, kept after a place is renamed or deleted */
+  from_name: string;
+  to_name: string;
   by: string;
   created: string;
 };

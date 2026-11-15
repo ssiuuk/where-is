@@ -117,7 +117,7 @@ export default function ItemScreen() {
             <View key={m.id} style={{ flexDirection: 'row', gap: space.sm }}>
               <Text style={{ color: c.muted, width: 92, fontSize: font.small }}>{timeAgo(m.created)}</Text>
               <Text style={{ color: c.text, flex: 1, fontSize: font.small }}>
-                {`${data.label(m.to_place) || 'No place'}${data.memberName(m.by) ? ` · ${data.memberName(m.by)}` : ''}`}
+                {`${data.label(m.to_place) || m.to_name || 'No place'}${data.memberName(m.by) ? ` · ${data.memberName(m.by)}` : ''}`}
               </Text>
             </View>
           ))}

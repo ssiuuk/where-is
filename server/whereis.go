@@ -12,6 +12,7 @@ import (
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/router"
 	"github.com/pocketbase/pocketbase/tools/types"
 )
 
@@ -68,6 +69,7 @@ func Register(app core.App, cfg Config) {
 		g.POST("/join", joinHousehold)
 		g.POST("/leave", leaveHousehold)
 		g.POST("/invite-code", rotateInviteCode)
+		g.POST("/move", moveItems)
 
 		se.Router.GET("/.well-known/assetlinks.json", assetLinks(cfg))
 		if hasWebApp(cfg.WebDir) {
@@ -101,6 +103,8 @@ func hasWebApp(dir string) bool {
 
 // ---------------------------------------------------------------------
 // households
+
+var errAlreadyMember = errors.New("You already belong to a household. Leave it in Settings before joining another.")
 
 const inviteAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no 0/O, 1/I
 
@@ -140,10 +144,6 @@ func createHousehold(e *core.RequestEvent) error {
 	if body.Name == "" {
 		return e.BadRequestError("Give the household a name.", nil)
 	}
-	if e.Auth.GetString("household") != "" {
-		return e.BadRequestError("You already belong to a household. Leave it first.", nil)
-	}
-
 	col, err := e.App.FindCollectionByNameOrId("households")
 	if err != nil {
 		return err
@@ -154,16 +154,22 @@ func createHousehold(e *core.RequestEvent) error {
 	h.Set("owner", e.Auth.Id)
 
 	err = e.App.RunInTransaction(func(tx core.App) error {
-		if err := tx.Save(h); err != nil {
-			return err
-		}
 		user, err := tx.FindRecordById("users", e.Auth.Id)
 		if err != nil {
+			return err
+		}
+		if user.GetString("household") != "" {
+			return errAlreadyMember
+		}
+		if err := tx.Save(h); err != nil {
 			return err
 		}
 		user.Set("household", h.Id)
 		return tx.Save(user)
 	})
+	if errors.Is(err, errAlreadyMember) {
+		return e.BadRequestError(errAlreadyMember.Error(), nil)
+	}
 	if err != nil {
 		return e.InternalServerError("Couldn't create the household.", err)
 	}
@@ -185,12 +191,26 @@ func joinHousehold(e *core.RequestEvent) error {
 	if err != nil {
 		return e.NotFoundError("No household has that invite code. Check it with the person who sent it.", nil)
 	}
-	user, err := e.App.FindRecordById("users", e.Auth.Id)
-	if err != nil {
-		return err
+	err = e.App.RunInTransaction(func(tx core.App) error {
+		user, err := tx.FindRecordById("users", e.Auth.Id)
+		if err != nil {
+			return err
+		}
+		switch user.GetString("household") {
+		case h.Id:
+			return nil // already in it
+		case "":
+			user.Set("household", h.Id)
+			return tx.Save(user)
+		default:
+			// one household at a time: switching means leaving on purpose first
+			return errAlreadyMember
+		}
+	})
+	if errors.Is(err, errAlreadyMember) {
+		return e.BadRequestError(errAlreadyMember.Error(), nil)
 	}
-	user.Set("household", h.Id)
-	if err := e.App.Save(user); err != nil {
+	if err != nil {
 		return e.InternalServerError("Couldn't join the household.", err)
 	}
 	return e.JSON(http.StatusOK, h)
@@ -277,7 +297,8 @@ func checkPlaceEmpty(e *core.RecordRequestEvent) error {
 // items
 
 // trackMove checks an item's place, stamps who moved it, and records the
-// move in the history once the save succeeds.
+// move in the history. The item and its history row are saved in one
+// transaction: if the history can't be written, the move fails too.
 func trackMove(e *core.RecordRequestEvent) error {
 	household := e.Record.GetString("household")
 	to := e.Record.GetString("place")
@@ -285,44 +306,131 @@ func trackMove(e *core.RecordRequestEvent) error {
 	if !e.Record.IsNew() {
 		from = e.Record.Original().GetString("place")
 	}
-
-	if to != "" && to != from {
+	if to == from {
+		return e.Next()
+	}
+	if to != "" {
 		p, err := e.App.FindRecordById("places", to)
 		if err != nil || p.GetString("household") != household {
 			return e.BadRequestError("That place doesn't exist in your household.", nil)
 		}
 	}
 
-	moved := to != from
-	if moved {
-		e.Record.Set("moved_at", types.NowDateTime())
-		if e.Auth != nil && e.Auth.Collection().Name == "users" {
-			e.Record.Set("moved_by", e.Auth.Id)
+	by := ""
+	if e.Auth != nil && e.Auth.Collection().Name == "users" {
+		by = e.Auth.Id
+	}
+	// clients can't send these (see the items API rules); the server sets them
+	e.Record.Set("moved_by", by)
+	e.Record.Set("moved_at", types.NowDateTime())
+
+	return e.App.RunInTransaction(func(tx core.App) error {
+		e.App = tx
+		if err := e.Next(); err != nil {
+			return err
 		}
-	}
+		return saveMove(tx, e.Record, from, to, by)
+	})
+}
 
-	if err := e.Next(); err != nil {
-		return err
-	}
-	if !moved {
-		return nil
-	}
-
-	col, err := e.App.FindCollectionByNameOrId("moves")
+// saveMove writes one history row. Place names are copied in too, so the
+// history still reads well after a place is renamed or deleted.
+func saveMove(app core.App, item *core.Record, from, to, by string) error {
+	col, err := app.FindCollectionByNameOrId("moves")
 	if err != nil {
 		return err
 	}
 	m := core.NewRecord(col)
-	m.Set("household", household)
-	m.Set("item", e.Record.Id)
+	m.Set("household", item.GetString("household"))
+	m.Set("item", item.Id)
 	m.Set("from_place", from)
 	m.Set("to_place", to)
-	m.Set("by", e.Record.GetString("moved_by"))
-	if err := e.App.Save(m); err != nil {
-		// the item itself is saved; a missing history row shouldn't fail the request
-		e.App.Logger().Error("Failed to record item move", "item", e.Record.Id, "error", err)
+	m.Set("from_name", placePathName(app, from))
+	m.Set("to_name", placePathName(app, to))
+	m.Set("by", by)
+	return app.Save(m)
+}
+
+// placePathName returns e.g. "Garage › Shelf 3", or "" for no place.
+func placePathName(app core.App, id string) string {
+	var names []string
+	seen := map[string]bool{}
+	for id != "" && !seen[id] && len(seen) < 50 {
+		seen[id] = true
+		p, err := app.FindRecordById("places", id)
+		if err != nil {
+			break
+		}
+		names = append([]string{p.GetString("name")}, names...)
+		id = p.GetString("parent")
 	}
-	return nil
+	return strings.Join(names, " › ")
+}
+
+// moveItems moves several items to one place, all or nothing: either every
+// item moves and gets its history row, or nothing changes.
+func moveItems(e *core.RequestEvent) error {
+	var body struct {
+		Items []string `json:"items"`
+		Place string   `json:"place"`
+	}
+	if err := e.BindBody(&body); err != nil {
+		return e.BadRequestError("Invalid request.", err)
+	}
+	if len(body.Items) == 0 || len(body.Items) > 200 {
+		return e.BadRequestError("Choose between 1 and 200 items to move.", nil)
+	}
+	user, err := e.App.FindRecordById("users", e.Auth.Id)
+	if err != nil {
+		return err
+	}
+	household := user.GetString("household")
+	if household == "" {
+		return e.BadRequestError("You don't belong to a household yet.", nil)
+	}
+	if body.Place != "" {
+		p, err := e.App.FindRecordById("places", body.Place)
+		if err != nil || p.GetString("household") != household {
+			return e.BadRequestError("That place doesn't exist in your household.", nil)
+		}
+	}
+
+	moved := make([]*core.Record, 0, len(body.Items))
+	err = e.App.RunInTransaction(func(tx core.App) error {
+		seen := map[string]bool{}
+		for _, id := range body.Items {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			item, err := tx.FindRecordById("items", id)
+			if err != nil || item.GetString("household") != household {
+				return e.NotFoundError("One of those items isn't in your household. Nothing was moved.", nil)
+			}
+			from := item.GetString("place")
+			if from != body.Place {
+				item.Set("place", body.Place)
+				item.Set("moved_by", user.Id)
+				item.Set("moved_at", types.NowDateTime())
+				if err := tx.Save(item); err != nil {
+					return err
+				}
+				if err := saveMove(tx, item, from, body.Place, user.Id); err != nil {
+					return err
+				}
+			}
+			moved = append(moved, item)
+		}
+		return nil
+	})
+	if err != nil {
+		var apiErr *router.ApiError
+		if errors.As(err, &apiErr) {
+			return apiErr
+		}
+		return e.InternalServerError("Couldn't move the items. Nothing was moved.", err)
+	}
+	return e.JSON(http.StatusOK, moved)
 }
 
 // ---------------------------------------------------------------------

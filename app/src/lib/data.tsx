@@ -140,7 +140,19 @@ export function DataProvider({ pb, household, children }: { pb: PocketBase; hous
       if (e.record.household !== household) return;
       setItems((list) => (e.action === 'delete' ? list.filter((x) => x.id !== e.record.id) : upsert(list, toItem(e.record))));
     };
-    const subs = [pb.collection('places').subscribe('*', onPlace), pb.collection('items').subscribe('*', onItem)];
+    // someone joins, renames themselves or changes their picture
+    const onMember = (e: RecordSubscription<RecordModel>) => {
+      if (e.action === 'delete' || e.record.household !== household) {
+        setMembers((list) => list.filter((x) => x.id !== e.record.id));
+      } else {
+        setMembers((list) => upsert(list, toMember(e.record)));
+      }
+    };
+    const subs = [
+      pb.collection('places').subscribe('*', onPlace),
+      pb.collection('items').subscribe('*', onItem),
+      pb.collection('users').subscribe('*', onMember),
+    ];
     const appState = AppState.addEventListener('change', (s) => {
       if (s === 'active') reload();
     });
@@ -204,8 +216,11 @@ export function DataProvider({ pb, household, children }: { pb: PocketBase; hous
 
   const moveItems = useCallback<Data['moveItems']>(
     async (ids, placeId) => {
-      // one request per item; the server records each move in the history
-      const results = await Promise.all(ids.map((id) => pb.collection('items').update(id, { place: placeId })));
+      // one server call: either every item moves (with its history) or none does
+      const results = await pb.send<RecordModel[]>('/api/whereis/move', {
+        method: 'POST',
+        body: { items: ids, place: placeId },
+      });
       setItems((list) => results.reduce((acc, r) => upsert(acc, toItem(r)), list));
     },
     [pb],
@@ -266,7 +281,7 @@ export function DataProvider({ pb, household, children }: { pb: PocketBase; hous
         filter: pb.filter('item = {:id}', { id: itemId }),
         sort: '-created',
       });
-      return list.items.map((r) => pick<Move>(r, ['id', 'item', 'from_place', 'to_place', 'by', 'created']));
+      return list.items.map((r) => pick<Move>(r, ['id', 'item', 'from_place', 'to_place', 'from_name', 'to_name', 'by', 'created']));
     },
     [pb],
   );

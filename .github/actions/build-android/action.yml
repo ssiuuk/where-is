@@ -1,0 +1,91 @@
+name: Build the Android app
+description: Typecheck, test and build app/ into $RUNNER_TEMP/where-is-android.apk
+
+inputs:
+  version-code:
+    description: Android versionCode
+    required: true
+  version-name:
+    description: Version name shown in the app
+    required: true
+  whereis-host:
+    description: Server host name for verified app links (optional)
+    required: false
+    default: ''
+  keystore-base64:
+    description: Release keystore, base64. Leave empty for a build signed with a temporary key.
+    required: false
+    default: ''
+  keystore-password:
+    required: false
+    default: ''
+  key-alias:
+    required: false
+    default: ''
+  key-password:
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: '24'
+        cache: npm
+        cache-dependency-path: app/package-lock.json
+
+    - name: Install
+      shell: bash
+      working-directory: app
+      run: npm ci
+
+    - name: Typecheck and test
+      shell: bash
+      working-directory: app
+      run: |
+        npm run typecheck
+        npm test
+
+    - name: Setup Java
+      uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: '17'
+        cache: gradle
+
+    - name: Prepare signing key
+      shell: bash
+      env:
+        ANDROID_KEYSTORE_BASE64: ${{ inputs.keystore-base64 }}
+      run: |
+        if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+        else
+          echo "::notice::No release key, so the app is signed with a temporary key"
+        fi
+
+    - name: Generate the Android project
+      shell: bash
+      working-directory: app
+      env:
+        APP_VERSION_CODE: ${{ inputs.version-code }}
+        APP_VERSION_NAME: ${{ inputs.version-name }}
+        WHEREIS_HOST: ${{ inputs.whereis-host }}
+        CI: '1'
+      run: npx expo prebuild --platform android --no-install
+
+    - name: Build
+      shell: bash
+      working-directory: app/android
+      env:
+        ANDROID_KEYSTORE_PASSWORD: ${{ inputs.keystore-password }}
+        ANDROID_KEY_ALIAS: ${{ inputs.key-alias }}
+        ANDROID_KEY_PASSWORD: ${{ inputs.key-password }}
+      run: |
+        chmod +x gradlew
+        ./gradlew --no-daemon assembleRelease
+        cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/where-is-android.apk"
+        rm -f "$RUNNER_TEMP/release.jks"

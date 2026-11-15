@@ -1,0 +1,68 @@
+name: Android Preview
+
+# Publishes the app built for a pull request as the release "android-pr-<number>",
+# and deletes that release when the pull request is closed.
+#
+# Both triggers run this file as it is on main, never the pull request's copy,
+# and neither checks out or runs the pull request's code. The build itself
+# happened in the read-only "check" job of android.yml.
+
+on:
+  workflow_run:
+    workflows: [Build Android App]
+    types: [completed]
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.pull_requests[0].number
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+      SHA: ${{ github.event.workflow_run.head_sha }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+    steps:
+      - name: Download the build
+        run: gh run download "$RUN_ID" --name where-is-android --dir "$RUNNER_TEMP/apk"
+
+      - name: Publish android-pr-${{ env.PR }}
+        run: |
+          tag="android-pr-$PR"
+          apk="$RUNNER_TEMP/where-is-android-pr-$PR.apk"
+          mv "$RUNNER_TEMP/apk/where-is-android.apk" "$apk"
+          if ! gh release view "$tag" > /dev/null 2>&1; then
+            gh release create "$tag" --prerelease --target "$SHA" \
+              --title "Android app (preview of pull request #$PR)" \
+              --notes "A test build of pull request #$PR, which isn't merged yet. It is signed with a temporary key, so uninstall the regular app before installing it. This release is deleted when the pull request is closed."
+          fi
+          gh release upload "$tag" "$apk" --clobber
+
+  cleanup:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Delete android-pr-${{ env.PR }}
+        run: |
+          if gh release view "android-pr-$PR" > /dev/null 2>&1; then
+            gh release delete "android-pr-$PR" --yes --cleanup-tag
+          fi

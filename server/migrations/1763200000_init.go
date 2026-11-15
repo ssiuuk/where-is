@@ -9,10 +9,12 @@ import (
 
 // Rules shared by the household-scoped collections (places, items).
 const (
-	memberRule   = `@request.auth.household != "" && household = @request.auth.household`
-	createRule   = `@request.auth.household != "" && @request.body.household = @request.auth.household`
-	updateRule   = memberRule + ` && (@request.body.household:isset = false || @request.body.household = @request.auth.household)`
-	noHousehold  = `@request.body.household:isset = false`
+	memberRule  = `@request.auth.household != "" && household = @request.auth.household`
+	createRule  = `@request.auth.household != "" && @request.body.household = @request.auth.household`
+	updateRule  = memberRule + ` && (@request.body.household:isset = false || @request.body.household = @request.auth.household)`
+	noHousehold = `@request.body.household:isset = false`
+	// who moved an item and when is set by the server, never by clients
+	noMoveStamp  = ` && @request.body.moved_by:isset = false && @request.body.moved_at:isset = false`
 	userSelfRule = `id = @request.auth.id`
 )
 
@@ -95,6 +97,8 @@ func init() {
 		items.AddIndex("idx_items_household", false, "household", "")
 		items.AddIndex("idx_items_place", false, "place", "")
 		setRules(items)
+		items.CreateRule = types.Pointer(createRule + noMoveStamp)
+		items.UpdateRule = types.Pointer(updateRule + noMoveStamp)
 		if err := app.Save(items); err != nil {
 			return err
 		}
@@ -106,6 +110,9 @@ func init() {
 			&core.RelationField{Name: "item", CollectionId: items.Id, MaxSelect: 1, Required: true, CascadeDelete: true},
 			&core.RelationField{Name: "from_place", CollectionId: places.Id, MaxSelect: 1},
 			&core.RelationField{Name: "to_place", CollectionId: places.Id, MaxSelect: 1},
+			// place names at the time, kept when places are later renamed or deleted
+			&core.TextField{Name: "from_name", Max: 1000},
+			&core.TextField{Name: "to_name", Max: 1000},
 			&core.RelationField{Name: "by", CollectionId: users.Id, MaxSelect: 1},
 			&core.AutodateField{Name: "created", OnCreate: true},
 		)
