@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/pocketbase/dbx"
@@ -24,6 +26,10 @@ type Config struct {
 	AndroidCertSHA256 []string
 	// AppDownloadURL is where the tag landing page sends people without the app.
 	AppDownloadURL string
+	// WebDir holds the web version of the app (the output of
+	// `npx expo export --platform web`). When it has an index.html, the
+	// server hosts the web app at / and label links open it.
+	WebDir string
 }
 
 // ConfigFromEnv reads Config from environment variables.
@@ -33,6 +39,7 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		GoogleClientSecret: strings.TrimSpace(getenv("GOOGLE_CLIENT_SECRET")),
 		AndroidPackage:     strings.TrimSpace(getenv("ANDROID_PACKAGE")),
 	}
+	c.WebDir = strings.TrimSpace(getenv("WEB_DIR"))
 	c.AppDownloadURL = strings.TrimSpace(getenv("APP_DOWNLOAD_URL"))
 	if c.AppDownloadURL == "" {
 		c.AppDownloadURL = "https://github.com/ssiuuk/where-is/releases/tag/android-latest"
@@ -62,10 +69,15 @@ func Register(app core.App, cfg Config) {
 		g.POST("/leave", leaveHousehold)
 		g.POST("/invite-code", rotateInviteCode)
 
-		se.Router.GET("/p/{id}", landingPage(cfg, "p"))
-		se.Router.GET("/i/{id}", landingPage(cfg, "i"))
 		se.Router.GET("/.well-known/assetlinks.json", assetLinks(cfg))
-		se.Router.GET("/", homePage)
+		if hasWebApp(cfg.WebDir) {
+			// the web app handles /, /p/<id>, /i/<id> and its other screens itself
+			se.Router.GET("/{path...}", apis.Static(os.DirFS(cfg.WebDir), true))
+		} else {
+			se.Router.GET("/p/{id}", landingPage(cfg, "p"))
+			se.Router.GET("/i/{id}", landingPage(cfg, "i"))
+			se.Router.GET("/", homePage)
+		}
 
 		return se.Next()
 	})
@@ -77,6 +89,14 @@ func Register(app core.App, cfg Config) {
 
 	app.OnRecordCreateRequest("items").BindFunc(trackMove)
 	app.OnRecordUpdateRequest("items").BindFunc(trackMove)
+}
+
+func hasWebApp(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(dir, "index.html"))
+	return err == nil
 }
 
 // ---------------------------------------------------------------------

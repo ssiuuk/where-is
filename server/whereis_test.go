@@ -2,6 +2,8 @@ package main
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -350,6 +352,45 @@ func TestLandingPage(t *testing.T) {
 		URL:             "/.well-known/assetlinks.json",
 		ExpectedStatus:  200,
 		ExpectedContent: []string{"[]"},
+	})
+}
+
+func TestWebApp(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<title>Where Is web</title>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "_expo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "_expo", "app.js"), []byte("console.log(1)"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app, err := tests.NewTestApp(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Cleanup()
+	Register(app, Config{WebDir: dir, AndroidPackage: "com.ssiuuk.whereis"})
+	f := &fixture{app: app}
+
+	for _, url := range []string{"/", "/p/abcdefghij12345", "/i/abcdefghij12345", "/places", "/settings"} {
+		run(t, f, tests.ApiScenario{
+			Name: "web app at " + url, Method: http.MethodGet, URL: url,
+			ExpectedStatus:  200,
+			ExpectedContent: []string{"Where Is web"},
+		})
+	}
+	run(t, f, tests.ApiScenario{
+		Name: "web app files", Method: http.MethodGet, URL: "/_expo/app.js",
+		ExpectedStatus:  200,
+		ExpectedContent: []string{"console.log(1)"},
+	})
+	run(t, f, tests.ApiScenario{
+		Name: "API still answers", Method: http.MethodGet, URL: "/api/health",
+		ExpectedStatus:  200,
+		ExpectedContent: []string{"API is healthy"},
 	})
 }
 

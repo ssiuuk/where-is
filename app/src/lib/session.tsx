@@ -1,6 +1,7 @@
 import * as WebBrowser from 'expo-web-browser';
 import PocketBase from 'pocketbase';
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { Platform } from 'react-native';
 
 import { createClient, savedServer, saveServer } from './client';
 import { normalizeServerUrl } from './links';
@@ -30,6 +31,16 @@ type Session = {
 };
 
 const SessionContext = createContext<Session | null>(null);
+
+/**
+ * In the browser the app is served by the server itself, so the server is
+ * wherever the page came from. EXPO_PUBLIC_SERVER_URL overrides it for
+ * development with `npx expo start --web`.
+ */
+export const webServerUrl =
+  Platform.OS === 'web'
+    ? normalizeServerUrl(process.env.EXPO_PUBLIC_SERVER_URL || (typeof window !== 'undefined' ? window.location.origin : ''))
+    : '';
 
 export function useSession(): Session {
   const s = useContext(SessionContext);
@@ -92,7 +103,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const url = await savedServer();
+      const url = webServerUrl || (await savedServer());
       if (url) {
         const client = await createClient(url);
         if (client.authStore.isValid) {
@@ -179,14 +190,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const signInWithGoogle = useCallback(async () => {
     const client = need();
     try {
-      await client.collection('users').authWithOAuth2({
-        provider: 'google',
-        urlCallback: (url) => {
-          WebBrowser.openBrowserAsync(url).catch(() => {});
-        },
-      });
+      await client.collection('users').authWithOAuth2(
+        Platform.OS === 'web'
+          ? // in a browser the SDK opens its own popup window
+            { provider: 'google' }
+          : {
+              provider: 'google',
+              urlCallback: (url) => {
+                WebBrowser.openBrowserAsync(url).catch(() => {});
+              },
+            },
+      );
     } finally {
-      WebBrowser.dismissBrowser().catch(() => {});
+      if (Platform.OS !== 'web') WebBrowser.dismissBrowser().catch(() => {});
     }
     await adopt(client);
   }, [need, adopt]);

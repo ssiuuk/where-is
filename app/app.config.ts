@@ -45,6 +45,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         ]
       : [],
   },
+  web: {
+    // a single-page app that the server hosts at https://<server>/
+    output: 'single',
+    bundler: 'metro',
+    favicon: './assets/favicon.png',
+    name: 'Where Is',
+    themeColor: '#1F6F5C',
+  },
   plugins: [
     'expo-router',
     ['expo-camera', { cameraPermission: 'Where Is uses the camera to scan labels and take photos of your things.' }],

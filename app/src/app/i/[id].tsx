@@ -2,6 +2,7 @@ import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Image, ScrollView, Text, View } from 'react-native';
 
+import { OpenInApp } from '@/components/OpenInApp';
 import { PhotoField } from '@/components/PhotoField';
 import { PlacePicker } from '@/components/PlacePicker';
 import { font, radius, space, useColors } from '@/components/theme';
@@ -63,6 +64,7 @@ export default function ItemScreen() {
   return (
     <ScrollView contentContainerStyle={{ padding: space.lg, gap: space.md }} keyboardShouldPersistTaps="handled">
       <Stack.Screen options={{ title: item.name }} />
+      <OpenInApp kind="i" id={item.id} />
       {editing ? (
         <EditItem
           initial={{ name: item.name, note: item.note }}

@@ -1,0 +1,8 @@
+**/node_modules
+app/dist
+app/android
+app/ios
+app/.expo
+server/pb_data
+server/.env
+.git

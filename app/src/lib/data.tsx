@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import PocketBase, { RecordModel, RecordSubscription } from 'pocketbase';
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 import { parsePlaceInput, PlaceMap, placeLabel, placeMap, resolvePlaceInput } from './places';
 import type { Item, Member, Move, Place } from './types';
@@ -64,13 +64,19 @@ function upsert<T extends { id: string }>(list: T[], rec: T): T[] {
 
 type Cache = { places: Place[]; items: Item[]; members: Member[]; savedAt: string };
 
-function photoForm(fields: Record<string, string>, photo: Photo): FormData {
+async function photoForm(fields: Record<string, string>, photo: Photo): Promise<FormData> {
   const form = new FormData();
   for (const [k, v] of Object.entries(fields)) form.append(k, v);
   const type = photo.mimeType || 'image/jpeg';
   const ext = type.split('/')[1] || 'jpg';
-  // React Native's FormData takes a file as {uri, name, type}
-  form.append('photo', { uri: photo.uri, name: `photo.${ext}`, type } as unknown as Blob);
+  if (Platform.OS === 'web') {
+    // in a browser the picked photo is a blob: or data: URL
+    const blob = await (await fetch(photo.uri)).blob();
+    form.append('photo', blob, `photo.${ext}`);
+  } else {
+    // React Native's FormData takes a file as {uri, name, type}
+    form.append('photo', { uri: photo.uri, name: `photo.${ext}`, type } as unknown as Blob);
+  }
   return form;
 }
 
@@ -172,7 +178,7 @@ export function DataProvider({ pb, household, children }: { pb: PocketBase; hous
     async ({ name, note = '', place, photo }) => {
       const fields = { household, name: name.trim(), note: note.trim(), place };
       const rec = photo
-        ? await pb.collection('items').create(photoForm(fields, photo))
+        ? await pb.collection('items').create(await photoForm(fields, photo))
         : await pb.collection('items').create(fields);
       const item = toItem(rec);
       setItems((list) => upsert(list, item));
@@ -186,7 +192,7 @@ export function DataProvider({ pb, household, children }: { pb: PocketBase; hous
       const fields: Record<string, string> = {};
       for (const [k, v] of Object.entries(patch)) fields[k] = typeof v === 'string' ? v.trim() : '';
       let rec: RecordModel;
-      if (photo) rec = await pb.collection('items').update(id, photoForm(fields, photo));
+      if (photo) rec = await pb.collection('items').update(id, await photoForm(fields, photo));
       else if (photo === null) rec = await pb.collection('items').update(id, { ...fields, photo: null });
       else rec = await pb.collection('items').update(id, fields);
       const item = toItem(rec);

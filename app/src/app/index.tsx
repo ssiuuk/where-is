@@ -52,7 +52,7 @@ export default function Find() {
         ListHeaderComponent={
           results.length ? (
             <Text style={{ color: c.muted, fontSize: font.small, paddingHorizontal: space.lg, paddingBottom: space.xs }}>
-              {query.trim() ? `${results.length} found` : `${items.length} things, latest first`}
+              {query.trim() ? `${results.length} found` : `${items.length} ${items.length === 1 ? 'thing' : 'things'}, latest first`}
             </Text>
           ) : undefined
         }

@@ -7,13 +7,20 @@ A phone app for remembering where your family put things. Everyone in the househ
 - **Two-tap move:** label something that moves around (a toolbox, the drill). Scan it, then scan the place you put it.
 - **History:** every move is recorded, so "it used to be in the loft" is one tap away.
 - **Offline:** the last list stays on the phone, so you can still look things up when the server can't be reached.
+- **Web:** the same app runs in any browser at your server's address, for use on a computer or an iPhone until the iPhone app exists.
 
 The repository has two parts:
 
 | Folder | What it is |
 | --- | --- |
 | `app/` | The phone app: React Native with Expo, TypeScript. Android builds come from GitHub Actions; the same code can become the iPhone app later. |
-| `server/` | The server: [PocketBase](https://pocketbase.io) with the household rules built in, run with Docker behind Caddy for HTTPS. |
+| `server/` | The server: [PocketBase](https://pocketbase.io) with the household rules built in, run with Docker behind Caddy for HTTPS. Its image also contains the web version of the app. |
+
+## Use it in a browser
+
+Open your server's address (for example `https://whereis.example.com`) in any browser and sign in. The web version has everything the phone app has except NFC stickers, which browsers can't read or write. QR scanning uses the browser's camera where it's supported. Labels are downloaded as images instead of shared.
+
+When someone scans a label with their phone's own camera, the link opens the place in the browser. On Android phones with the app installed, an **Open in the app** button takes them to the app.
 
 ## Install the app (Android)
 
@@ -40,7 +47,7 @@ Then add these repository secrets under Settings > Secrets and variables > Actio
 
 ### Labels that open the app directly (optional)
 
-Without this, scanning a QR label with the phone's own camera opens a small page on your server with an **Open in Where Is** button. Scanning from inside the app, and tapping NFC stickers, always opens the app directly.
+Without this, scanning a QR label with the phone's own camera opens the place in the browser, with an **Open in the app** button on Android. Scanning from inside the app, and tapping NFC stickers, always opens the app directly.
 
 To skip that page:
 
@@ -63,11 +70,11 @@ The server needs a machine that's always on, such as a small Linux VM on ESX wit
 
 1. **DNS:** create an A record (or a CNAME to your dynamic DNS name) such as `whereis.example.com`.
 2. **Router:** forward TCP ports 80 and 443 (and UDP 443 if you want HTTP/3) to the VM. Caddy uses port 80 to get the Let's Encrypt certificate.
-3. **Files:** copy the `server/` folder to the VM, or clone the repository there.
+3. **Files:** copy the `server/` folder to the VM. To build the image on the VM instead of pulling it, clone the whole repository, because the image includes the web app from `app/`.
 4. **Settings:** `cp .env.example .env` and set `WHEREIS_DOMAIN`. Leave the rest for now.
-5. **Start:** `docker compose up -d`. This pulls the image that GitHub Actions publishes to `ghcr.io/ssiuuk/where-is-server`. To build it on the VM instead, run `docker compose up -d --build`. If the repository is private, the image is too: run `docker login ghcr.io` with a token that can read packages, or use `--build`.
+5. **Start:** `docker compose up -d`. This pulls the image that GitHub Actions publishes to `ghcr.io/ssiuuk/where-is-server`. To build it on the VM instead, run `docker compose up -d --build` from `server/` in a full clone. If the repository is private, the image is too: run `docker login ghcr.io` with a token that can read packages, or use `--build`.
 6. **Admin account:** `docker compose exec whereis /app/whereis superuser upsert you@example.com 'a-long-password'`, then open `https://whereis.example.com/_/` to reach the PocketBase dashboard.
-7. Check `https://whereis.example.com/api/health`, then point the app at `whereis.example.com`.
+7. Open `https://whereis.example.com` to use the web app, or point the phone app at `whereis.example.com`.
 
 **Updating:** `docker compose pull && docker compose up -d`. Database changes are applied automatically when the server starts.
 
@@ -79,7 +86,7 @@ The server needs a machine that's always on, such as a small Linux VM on ESX wit
 2. Under **Authorized redirect URIs**, add `https://whereis.example.com/api/oauth2-redirect` with your own host name.
 3. Put the client ID and secret in `.env` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, then run `docker compose up -d`.
 
-The app shows **Continue with Google** as soon as the server has it turned on. You can also set it up in the dashboard under Collections → users → Options → OAuth2. Settings in `.env` take priority when the server starts.
+The app and the web version show **Continue with Google** as soon as the server has it turned on. You can also set it up in the dashboard under Collections → users → Options → OAuth2. Settings in `.env` take priority when the server starts.
 
 ### Who can get in
 
@@ -100,16 +107,19 @@ Every household's places, items and history are only visible to its members. Thi
 cd server
 go test ./...
 go run . serve            # http://127.0.0.1:8090, dashboard at /_/
+# with the web app: build it (below), then WEB_DIR=../app/dist go run . serve
 
 # app: Node 24
 cd app
 npm ci
 npm run typecheck && npm test
 npx expo run:android      # needs the Android SDK; builds a development app
+npx expo export --platform web --output-dir dist   # the web version
+EXPO_PUBLIC_SERVER_URL=http://127.0.0.1:8090 npx expo start --web   # web, live reloading
 ```
 
 The app uses Expo's generated native projects (`npx expo prebuild`), so `app/android` is not committed. Native settings live in `app/app.config.ts` and the config plugins in `app/plugins/`.
 
 ## iPhone
 
-The app code already runs on iOS, including NFC reading and writing on iPhone 7 and later. Distribution still needs an Apple Developer account and a build pipeline. That's planned as a follow-up.
+Until the iPhone app exists, iPhones can use the web version at the server's address; Safari's share menu can add it to the home screen as an icon. The app code already runs on iOS, including NFC reading and writing on iPhone 7 and later. Distribution still needs an Apple Developer account and a build pipeline. That's planned as a follow-up.

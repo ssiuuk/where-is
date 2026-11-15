@@ -5,6 +5,7 @@ import { FlatList, Modal, Pressable, Text, View } from 'react-native';
 import { CarryingBanner } from '@/components/CarryingBanner';
 import { ItemRow } from '@/components/ItemRow';
 import { OfflineNotice } from '@/components/OfflineNotice';
+import { OpenInApp } from '@/components/OpenInApp';
 import { PlacePicker } from '@/components/PlacePicker';
 import { font, radius, space, useColors } from '@/components/theme';
 import { Body, Button, ConfirmRow, Empty, ErrorText, Field, Heading, Icon, Tape } from '@/components/ui';
@@ -75,6 +76,7 @@ export default function PlaceScreen() {
     <View style={{ padding: space.lg, gap: space.md }}>
       <Stack.Screen options={{ title: place.name }} />
       {place.parent ? <Tape text={data.label(place.parent)} /> : null}
+      <OpenInApp kind="p" id={id} />
       <OfflineNotice />
       <CarryingBanner placeId={id} />
 

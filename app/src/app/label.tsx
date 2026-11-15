@@ -1,7 +1,7 @@
 import * as Sharing from 'expo-sharing';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { ComponentRef, useEffect, useRef, useState } from 'react';
-import { ScrollView, Share, Text, View } from 'react-native';
+import { Platform, ScrollView, Share, Text, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { captureRef } from 'react-native-view-shot';
 
@@ -38,6 +38,15 @@ export default function Label() {
   const shareImage = async () => {
     setError('');
     try {
+      if (Platform.OS === 'web') {
+        // browsers download the image instead of opening a share sheet
+        const dataUri = await captureRef(labelRef, { format: 'png', quality: 1, result: 'data-uri' });
+        const a = document.createElement('a');
+        a.href = dataUri;
+        a.download = `where-is-${name.replace(/[^\w-]+/g, '-').toLowerCase()}.png`;
+        a.click();
+        return;
+      }
       const uri = await captureRef(labelRef, { format: 'png', quality: 1, result: 'tmpfile' });
       await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: `Label for ${name}` });
     } catch (e) {
@@ -80,11 +89,19 @@ export default function Label() {
 
       <Heading>QR label</Heading>
       <Body muted>Save or send the image to print it, then stick it on the {kind === 'p' ? 'shelf, drawer or box' : 'item'}.</Body>
-      <Button icon="share-variant-outline" title="Save or share label image" onPress={shareImage} />
+      <Button
+        icon={Platform.OS === 'web' ? 'download-outline' : 'share-variant-outline'}
+        title={Platform.OS === 'web' ? 'Download label image' : 'Save or share label image'}
+        onPress={shareImage}
+      />
 
       <Heading>NFC sticker</Heading>
       {nfc === 'none' ? (
-        <Body muted>This phone doesn't have NFC. Use the QR label instead.</Body>
+        <Body muted>
+          {Platform.OS === 'web'
+            ? 'Write NFC stickers from the phone app.'
+            : "This phone doesn't have NFC. Use the QR label instead."}
+        </Body>
       ) : nfc === 'off' ? (
         <Button kind="secondary" icon="nfc-search-variant" title="Turn on NFC" onPress={openNfcSettings} />
       ) : (
@@ -105,7 +122,7 @@ export default function Label() {
 
       <Heading>Link</Heading>
       <Text selectable style={{ color: c.muted, fontSize: font.small }}>{url}</Text>
-      <Button kind="plain" title="Share link" onPress={() => Share.share({ message: url })} />
+      {Platform.OS !== 'web' ? <Button kind="plain" title="Share link" onPress={() => Share.share({ message: url })} /> : null}
     </ScrollView>
   );
 }

@@ -148,7 +148,7 @@ function SignIn() {
           setError('');
         }}
       />
-      <Button kind="plain" title="Use a different server" onPress={() => s.forgetServer()} />
+      {Platform.OS !== 'web' ? <Button kind="plain" title="Use a different server" onPress={() => s.forgetServer()} /> : null}
     </View>
   );
 }

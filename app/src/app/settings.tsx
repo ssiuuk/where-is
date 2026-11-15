@@ -30,14 +30,20 @@ export default function Settings() {
     }
   };
 
-  const invite = () =>
-    Share.share({
-      message:
-        `Join our household "${s.household.name}" on Where Is.\n` +
-        `1. Install the app: https://github.com/ssiuuk/where-is/releases/tag/android-latest\n` +
-        `2. Server: ${s.serverUrl}\n` +
-        `3. Invite code: ${s.household.invite_code}`,
-    });
+  const inviteText =
+    `Join our household "${s.household.name}" on Where Is.\n` +
+    `1. Open ${s.serverUrl} in a browser, or install the Android app: https://github.com/ssiuuk/where-is/releases/tag/android-latest\n` +
+    `2. Server: ${s.serverUrl}\n` +
+    `3. Invite code: ${s.household.invite_code}`;
+  const [showInvite, setShowInvite] = useState(false);
+  const invite = async () => {
+    try {
+      await Share.share({ message: inviteText });
+    } catch {
+      // browsers without a share sheet: show the text to copy instead
+      setShowInvite(true);
+    }
+  };
 
   return (
     <ScrollView contentContainerStyle={{ padding: space.lg, gap: space.md }} keyboardShouldPersistTaps="handled">
@@ -54,6 +60,11 @@ export default function Settings() {
         </Text>
         <Body muted>Anyone with this code and the server address can join and see everything in the household.</Body>
         <Button icon="share-variant-outline" title="Send invite" onPress={invite} disabled={!s.household.invite_code} />
+        {showInvite ? (
+          <Text selectable style={{ color: c.text, fontSize: font.small }}>
+            {inviteText}
+          </Text>
+        ) : null}
         {confirm === 'code' ? (
           <ConfirmRow
             ask="Make a new code? The current one stops working. People already in the household stay in."
