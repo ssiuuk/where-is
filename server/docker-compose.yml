@@ -1,0 +1,32 @@
+# Where Is server with Caddy in front for HTTPS.
+# Copy .env.example to .env, set WHEREIS_DOMAIN, then: docker compose up -d
+services:
+  whereis:
+    image: ${WHEREIS_IMAGE:-ghcr.io/ssiuuk/where-is-server:latest}
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./pb_data:/app/pb_data
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      WHEREIS_DOMAIN: ${WHEREIS_DOMAIN:?set WHEREIS_DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - whereis
+
+volumes:
+  caddy_data:
+  caddy_config:

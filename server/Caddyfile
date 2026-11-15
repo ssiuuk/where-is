@@ -1,0 +1,11 @@
+{$WHEREIS_DOMAIN} {
+	encode zstd gzip
+	# photos can be up to 10 MB
+	request_body {
+		max_size 12MB
+	}
+	reverse_proxy whereis:8090 {
+		# realtime updates are a long-lived stream
+		flush_interval -1
+	}
+}
