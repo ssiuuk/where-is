@@ -6,6 +6,9 @@ import { Platform } from 'react-native';
 import { adminApi, noRoles, Roles } from './admin';
 import { createClient, savedServer, saveServer } from './client';
 import { normalizeServerUrl } from './links';
+import { changePasswordAndSignIn, PasswordChangedError } from './password';
+
+export { PasswordChangedError };
 import type { Household } from './types';
 
 export type SessionUser = { id: string; name: string; email: string; household: string; collectionId: string; avatar: string };
@@ -34,6 +37,8 @@ type Session = {
   renameHousehold(name: string): Promise<void>;
   refresh(): Promise<void>;
   changePassword(current: string, next: string): Promise<void>;
+  /** A message for the sign-in screen, e.g. after a password change signed this device out. */
+  notice: string;
   requestPasswordReset(email: string): Promise<void>;
 };
 
@@ -94,6 +99,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setRoles(noRoles);
     }
   }, []);
+  const [notice, setNotice] = useState('');
 
   const loadHousehold = useCallback(async (client: PocketBase, u: SessionUser | null) => {
     if (!u?.household) {
@@ -114,6 +120,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const adopt = useCallback(
     async (client: PocketBase) => {
       const u = toUser(client.authStore.record as Record<string, unknown> | null);
+      if (u) setNotice('');
       setUser(u);
       await Promise.all([loadHousehold(client, u), u ? loadRoles(client) : Promise.resolve(setRoles(noRoles))]);
     },
@@ -261,10 +268,25 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const client = need();
       const me = client.authStore.record;
       if (!me) throw new Error('Sign in first.');
-      await client.collection('users').update(me.id, { oldPassword: current, password: next, passwordConfirm: next });
-      // a new password signs out every device, this one included: sign straight back in
-      await client.collection('users').authWithPassword(me.email, next);
-      await adopt(client);
+      try {
+        await changePasswordAndSignIn({
+          update: async () => {
+            await client.collection('users').update(me.id, { oldPassword: current, password: next, passwordConfirm: next });
+          },
+          signIn: async () => {
+            await client.collection('users').authWithPassword(me.email, next);
+            await adopt(client);
+          },
+          signOut: () => {
+            client.authStore.clear();
+            setUser(null);
+            setHousehold(null);
+          },
+        });
+      } catch (e) {
+        if (e instanceof PasswordChangedError) setNotice(e.message);
+        throw e;
+      }
     },
     [need, adopt],
   );
@@ -316,11 +338,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       ready, serverUrl, pb, user, household, roles, refreshRoles,
       connectServer, forgetServer, signIn, signUp, signInWithGoogle, googleAvailable, signupOpen, signOut,
       createHousehold, joinHousehold, leaveHousehold, newInviteCode, renameHousehold, refresh,
-      changePassword, requestPasswordReset,
+      changePassword, requestPasswordReset, notice,
     }),
     [ready, serverUrl, pb, user, household, roles, refreshRoles, connectServer, forgetServer, signIn, signUp, signInWithGoogle,
       googleAvailable, signupOpen, signOut, createHousehold, joinHousehold, leaveHousehold, newInviteCode, renameHousehold, refresh,
-      changePassword, requestPasswordReset],
+      changePassword, requestPasswordReset, notice],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

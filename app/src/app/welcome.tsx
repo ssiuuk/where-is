@@ -75,7 +75,8 @@ function SignIn() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [google, setGoogle] = useState(false);
-  const [signup, setSignup] = useState(true);
+  // null until the server says whether sign-up is open
+  const [signup, setSignup] = useState<boolean | null>(null);
 
   useEffect(() => {
     s.googleAvailable().then(setGoogle);
@@ -140,14 +141,14 @@ function SignIn() {
         onSubmitEditing={submit}
       />
       <ErrorText>{error}</ErrorText>
-      {notice ? <Text style={{ color: c.muted }}>{notice}</Text> : null}
+      {notice || s.notice ? <Text style={{ color: c.muted }}>{notice || s.notice}</Text> : null}
       <Button
         title={mode === 'in' ? 'Sign in' : 'Create account'}
         onPress={submit}
         busy={busy === 'password'}
         disabled={!!busy || !email.trim() || !password || (mode === 'up' && !name.trim())}
       />
-      {signup ? (
+      {signup === null ? null : signup ? (
         <Button
           kind="plain"
           title={mode === 'in' ? 'New here? Create an account' : 'Already have an account? Sign in'}

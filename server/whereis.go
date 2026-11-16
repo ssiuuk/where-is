@@ -70,9 +70,12 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		FromAddress: strings.TrimSpace(getenv("MAIL_FROM_ADDRESS")),
 		FromName:    strings.TrimSpace(getenv("MAIL_FROM_NAME")),
 	}
-	c.Mail.Port, _ = strconv.Atoi(strings.TrimSpace(getenv("SMTP_PORT")))
-	if c.Mail.Port == 0 {
+	if raw := strings.TrimSpace(getenv("SMTP_PORT")); raw == "" {
 		c.Mail.Port = 587
+	} else if port, err := strconv.Atoi(raw); err == nil {
+		c.Mail.Port = port
+	} else {
+		c.Mail.Port = -1 // not a number: refused when the mail settings are applied
 	}
 	switch strings.ToLower(strings.TrimSpace(getenv("SMTP_TLS"))) {
 	case "true", "1", "yes", "on":
@@ -553,6 +556,9 @@ func applyMailConfig(app core.App, cfg Config) error {
 		settings.Meta.AppURL = cfg.PublicURL
 	}
 	if m := cfg.Mail; m.Host != "" {
+		if m.Port < 1 || m.Port > 65535 {
+			return errors.New("SMTP_PORT must be a port number from 1 to 65535, usually 587 or 465")
+		}
 		if m.FromAddress == "" {
 			return errors.New("SMTP_HOST is set but MAIL_FROM_ADDRESS is empty: set the address password reset emails come from")
 		}

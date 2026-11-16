@@ -28,7 +28,7 @@ func adminFixture(t *testing.T) *fixture {
 	return f
 }
 
-func auth(t testing.TB, u *core.Record) map[string]string {
+func asUser(t testing.TB, u *core.Record) map[string]string {
 	return map[string]string{"Authorization": token(t, u)}
 }
 
@@ -45,37 +45,37 @@ func TestAdminRoles(t *testing.T) {
 
 	run(t, f, tests.ApiScenario{
 		Name: "family admin", Method: http.MethodGet, URL: "/api/whereis/admin/roles",
-		Headers: auth(t, f.ann), ExpectedStatus: 200,
+		Headers: asUser(t, f.ann), ExpectedStatus: 200,
 		ExpectedContent: []string{`"family":true`, `"site":false`},
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "plain member", Method: http.MethodGet, URL: "/api/whereis/admin/roles",
-		Headers: auth(t, f.ben), ExpectedStatus: 200,
+		Headers: asUser(t, f.ben), ExpectedStatus: 200,
 		ExpectedContent: []string{`"family":false`, `"site":false`},
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "site admin", Method: http.MethodGet, URL: "/api/whereis/admin/roles",
-		Headers: auth(t, f.dan), ExpectedStatus: 200,
+		Headers: asUser(t, f.dan), ExpectedStatus: 200,
 		ExpectedContent: []string{`"site":true`},
 	})
 	// an unverified account with a listed email is not an admin
 	eve := f.user(t, "Eve@Example.com", "")
 	run(t, f, tests.ApiScenario{
 		Name: "unverified listed email", Method: http.MethodGet, URL: "/api/whereis/admin/roles",
-		Headers: auth(t, eve), ExpectedStatus: 200,
+		Headers: asUser(t, eve), ExpectedStatus: 200,
 		ExpectedContent: []string{`"site":false`, `"siteNeedsVerify":true`},
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "unverified listed email can't use site tools", Method: http.MethodGet, URL: "/api/whereis/admin/site/users",
-		Headers: auth(t, eve), ExpectedStatus: 403,
+		Headers: asUser(t, eve), ExpectedStatus: 403,
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "member can't use family tools", Method: http.MethodGet, URL: "/api/whereis/admin/family",
-		Headers: auth(t, f.ben), ExpectedStatus: 403,
+		Headers: asUser(t, f.ben), ExpectedStatus: 403,
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "family admin can't use site tools", Method: http.MethodGet, URL: "/api/whereis/admin/site",
-		Headers: auth(t, f.ann), ExpectedStatus: 403,
+		Headers: asUser(t, f.ann), ExpectedStatus: 403,
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "signed out", Method: http.MethodGet, URL: "/api/whereis/admin/family",
@@ -83,7 +83,7 @@ func TestAdminRoles(t *testing.T) {
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "family overview", Method: http.MethodGet, URL: "/api/whereis/admin/family",
-		Headers: auth(t, f.ann), ExpectedStatus: 200,
+		Headers: asUser(t, f.ann), ExpectedStatus: 200,
 		ExpectedContent:    []string{`"invite_code":"ABCD-2345"`, `"email":"ben@example.com"`, `"owner":true`},
 		NotExpectedContent: []string{"cat@example.com"},
 	})
@@ -95,39 +95,39 @@ func TestFamilyInvitesAndMembers(t *testing.T) {
 
 	run(t, f, tests.ApiScenario{
 		Name: "turn invites off", Method: http.MethodPost, URL: "/api/whereis/admin/family/invite",
-		Headers: auth(t, f.ann), Body: strings.NewReader(`{"action":"off"}`),
+		Headers: asUser(t, f.ann), Body: strings.NewReader(`{"action":"off"}`),
 		ExpectedStatus: 200, ExpectedContent: []string{`"invites_off":true`},
 	})
 	eve := f.user(t, "eve2@example.com", "")
 	run(t, f, tests.ApiScenario{
 		Name: "can't join while off", Method: http.MethodPost, URL: "/api/whereis/join",
-		Headers: auth(t, eve), Body: strings.NewReader(`{"code":"ABCD-2345"}`),
+		Headers: asUser(t, eve), Body: strings.NewReader(`{"code":"ABCD-2345"}`),
 		ExpectedStatus: 403, ExpectedContent: []string{"isn't taking new members"},
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "members can't turn invites back on themselves", Method: http.MethodPatch,
-		URL: "/api/collections/households/records/" + f.h1.Id, Headers: auth(t, f.ben),
+		URL: "/api/collections/households/records/" + f.h1.Id, Headers: asUser(t, f.ben),
 		Body: strings.NewReader(`{"invites_off":false}`), ExpectedStatus: 404,
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "new code turns invites on", Method: http.MethodPost, URL: "/api/whereis/admin/family/invite",
-		Headers: auth(t, f.ann), Body: strings.NewReader(`{"action":"new"}`),
+		Headers: asUser(t, f.ann), Body: strings.NewReader(`{"action":"new"}`),
 		ExpectedStatus: 200, ExpectedContent: []string{`"invites_off":false`}, NotExpectedContent: []string{"ABCD-2345"},
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "remove a member", Method: http.MethodPost, URL: "/api/whereis/admin/family/members/" + f.ben.Id + "/remove",
-		Headers: auth(t, f.ann), ExpectedStatus: 200, NotExpectedContent: []string{"ben@example.com"},
+		Headers: asUser(t, f.ann), ExpectedStatus: 200, NotExpectedContent: []string{"ben@example.com"},
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "can't remove someone from another household", Method: http.MethodPost,
-		URL: "/api/whereis/admin/family/members/" + f.cat.Id + "/remove", Headers: auth(t, f.ann), ExpectedStatus: 404,
+		URL: "/api/whereis/admin/family/members/" + f.cat.Id + "/remove", Headers: asUser(t, f.ann), ExpectedStatus: 404,
 	})
 
 	// leaving hands family admin to the next member
 	ben := f.user(t, "ben2@example.com", f.h1.Id)
 	run(t, f, tests.ApiScenario{
 		Name: "owner leaves", Method: http.MethodPost, URL: "/api/whereis/leave",
-		Headers: auth(t, f.ann), ExpectedStatus: 204,
+		Headers: asUser(t, f.ann), ExpectedStatus: 204,
 	})
 	h, _ := f.app.FindRecordById("households", f.h1.Id)
 	if h.GetString("owner") != ben.Id {
@@ -140,15 +140,15 @@ func TestHandOverFamilyAdmin(t *testing.T) {
 	defer f.app.Cleanup()
 	run(t, f, tests.ApiScenario{
 		Name: "hand over", Method: http.MethodPost, URL: "/api/whereis/admin/family/owner",
-		Headers: auth(t, f.ann), Body: strings.NewReader(`{"user":"` + f.ben.Id + `"}`), ExpectedStatus: 204,
+		Headers: asUser(t, f.ann), Body: strings.NewReader(`{"user":"` + f.ben.Id + `"}`), ExpectedStatus: 204,
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "old owner is no longer family admin", Method: http.MethodGet, URL: "/api/whereis/admin/family",
-		Headers: auth(t, f.ann), ExpectedStatus: 403,
+		Headers: asUser(t, f.ann), ExpectedStatus: 403,
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "new owner is", Method: http.MethodGet, URL: "/api/whereis/admin/family",
-		Headers: auth(t, f.ben), ExpectedStatus: 200,
+		Headers: asUser(t, f.ben), ExpectedStatus: 200,
 	})
 }
 
@@ -159,16 +159,16 @@ func TestRecycleBin(t *testing.T) {
 	// give the drill some history, then delete it as a member
 	run(t, f, tests.ApiScenario{
 		Name: "move", Method: http.MethodPatch, URL: "/api/collections/items/records/" + f.drill.Id,
-		Headers: auth(t, f.ben), Body: strings.NewReader(`{"place":"` + f.shelf.Id + `"}`), ExpectedStatus: 200,
+		Headers: asUser(t, f.ben), Body: strings.NewReader(`{"place":"` + f.shelf.Id + `"}`), ExpectedStatus: 200,
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "delete", Method: http.MethodDelete, URL: "/api/collections/items/records/" + f.drill.Id,
-		Headers: auth(t, f.ben), ExpectedStatus: 204,
+		Headers: asUser(t, f.ben), ExpectedStatus: 204,
 	})
 	var trashID string
 	run(t, f, tests.ApiScenario{
 		Name: "in the bin", Method: http.MethodGet, URL: "/api/whereis/admin/family/trash",
-		Headers: auth(t, f.ann), ExpectedStatus: 200,
+		Headers: asUser(t, f.ann), ExpectedStatus: 200,
 		ExpectedContent: []string{`"name":"Drill"`, `"place":"Garage › Shelf 3"`},
 		AfterTestFunc: func(t testing.TB, app *tests.TestApp, res *http.Response) {
 			var out struct{ Items []struct{ ID string } }
@@ -178,11 +178,11 @@ func TestRecycleBin(t *testing.T) {
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "other family admins can't see it", Method: http.MethodPost, URL: "/api/whereis/admin/family/trash/" + trashID + "/restore",
-		Headers: auth(t, f.cat), ExpectedStatus: 403,
+		Headers: asUser(t, f.cat), ExpectedStatus: 403,
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "restore", Method: http.MethodPost, URL: "/api/whereis/admin/family/trash/" + trashID + "/restore",
-		Headers: auth(t, f.ann), ExpectedStatus: 204,
+		Headers: asUser(t, f.ann), ExpectedStatus: 204,
 	})
 	item, err := f.app.FindRecordById("items", f.drill.Id)
 	if err != nil {
@@ -198,16 +198,16 @@ func TestRecycleBin(t *testing.T) {
 	// a deleted place comes back too; its parent is cleared if gone
 	run(t, f, tests.ApiScenario{
 		Name: "move drill away", Method: http.MethodPatch, URL: "/api/collections/items/records/" + f.drill.Id,
-		Headers: auth(t, f.ben), Body: strings.NewReader(`{"place":""}`), ExpectedStatus: 200,
+		Headers: asUser(t, f.ben), Body: strings.NewReader(`{"place":""}`), ExpectedStatus: 200,
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "delete place", Method: http.MethodDelete, URL: "/api/collections/places/records/" + f.shelf.Id,
-		Headers: auth(t, f.ben), ExpectedStatus: 204,
+		Headers: asUser(t, f.ben), ExpectedStatus: 204,
 	})
 	trash, _ := f.app.FindFirstRecordByData("trash", "record", f.shelf.Id)
 	run(t, f, tests.ApiScenario{
 		Name: "restore place", Method: http.MethodPost, URL: "/api/whereis/admin/family/trash/" + trash.Id + "/restore",
-		Headers: auth(t, f.ann), ExpectedStatus: 204,
+		Headers: asUser(t, f.ann), ExpectedStatus: 204,
 	})
 	if p, err := f.app.FindRecordById("places", f.shelf.Id); err != nil || p.GetString("parent") != f.garage.Id {
 		t.Fatalf("place not restored: %v", err)
@@ -219,20 +219,20 @@ func TestActivityLog(t *testing.T) {
 	defer f.app.Cleanup()
 	run(t, f, tests.ApiScenario{
 		Name: "add", Method: http.MethodPost, URL: "/api/collections/items/records",
-		Headers: auth(t, f.ben), Body: strings.NewReader(`{"household":"` + f.h1.Id + `","name":"Saw","place":"` + f.garage.Id + `"}`),
+		Headers: asUser(t, f.ben), Body: strings.NewReader(`{"household":"` + f.h1.Id + `","name":"Saw","place":"` + f.garage.Id + `"}`),
 		ExpectedStatus: 200,
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "rename and move", Method: http.MethodPatch, URL: "/api/collections/items/records/" + f.drill.Id,
-		Headers: auth(t, f.ben), Body: strings.NewReader(`{"name":"Big drill","place":"` + f.shelf.Id + `"}`), ExpectedStatus: 200,
+		Headers: asUser(t, f.ben), Body: strings.NewReader(`{"name":"Big drill","place":"` + f.shelf.Id + `"}`), ExpectedStatus: 200,
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "label printed: not logged", Method: http.MethodPatch, URL: "/api/collections/places/records/" + f.garage.Id,
-		Headers: auth(t, f.ben), Body: strings.NewReader(`{"label_at":"2026-11-16 10:00:00.000Z"}`), ExpectedStatus: 200,
+		Headers: asUser(t, f.ben), Body: strings.NewReader(`{"label_at":"2026-11-16 10:00:00.000Z"}`), ExpectedStatus: 200,
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "log", Method: http.MethodGet, URL: "/api/whereis/admin/family/activity",
-		Headers: auth(t, f.ann), ExpectedStatus: 200,
+		Headers: asUser(t, f.ann), ExpectedStatus: 200,
 		ExpectedContent: []string{`"action":"added"`, `"name":"Saw"`, `"action":"moved"`, `"detail":"Garage → Garage › Shelf 3"`,
 			`"action":"renamed"`, `"detail":"was Drill"`, `"by":"ben@example.com"`},
 		NotExpectedContent: []string{`"kind":"place"`},
@@ -249,7 +249,7 @@ func TestImportExport(t *testing.T) {
 	}
 	run(t, f, tests.ApiScenario{
 		Name: "dry run", Method: http.MethodPost, URL: "/api/whereis/admin/family/import",
-		Headers: auth(t, f.ann), Body: body(true), ExpectedStatus: 200,
+		Headers: asUser(t, f.ann), Body: body(true), ExpectedStatus: 200,
 		ExpectedContent: []string{`"items":2`, `"places":2`, `"skipped":2`},
 	})
 	if n, _ := f.app.CountRecords("items", dbx.HashExp{"household": f.h1.Id}); n != 1 {
@@ -257,17 +257,17 @@ func TestImportExport(t *testing.T) {
 	}
 	run(t, f, tests.ApiScenario{
 		Name: "import", Method: http.MethodPost, URL: "/api/whereis/admin/family/import",
-		Headers: auth(t, f.ann), Body: body(false), ExpectedStatus: 200,
+		Headers: asUser(t, f.ann), Body: body(false), ExpectedStatus: 200,
 		ExpectedContent: []string{`"items":2`, `"places":2`},
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "import again skips everything", Method: http.MethodPost, URL: "/api/whereis/admin/family/import",
-		Headers: auth(t, f.ann), Body: body(false), ExpectedStatus: 200,
+		Headers: asUser(t, f.ann), Body: body(false), ExpectedStatus: 200,
 		ExpectedContent: []string{`"items":0`, `"places":0`},
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "bad header", Method: http.MethodPost, URL: "/api/whereis/admin/family/import",
-		Headers: auth(t, f.ann), Body: strings.NewReader(`{"kind":"items","csv":"what,where\na,b"}`), ExpectedStatus: 400,
+		Headers: asUser(t, f.ann), Body: strings.NewReader(`{"kind":"items","csv":"what,where\na,b"}`), ExpectedStatus: 400,
 	})
 
 	tok, _ := f.ann.NewFileToken()
@@ -296,12 +296,12 @@ func TestMergeDuplicates(t *testing.T) {
 
 	run(t, f, tests.ApiScenario{
 		Name: "find", Method: http.MethodGet, URL: "/api/whereis/admin/family/duplicates",
-		Headers: auth(t, f.ann), ExpectedStatus: 200,
+		Headers: asUser(t, f.ann), ExpectedStatus: 200,
 		ExpectedContent: []string{`"id":"` + garage2.Id + `"`, `"id":"` + saw2.Id + `"`},
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "merge places", Method: http.MethodPost, URL: "/api/whereis/admin/family/merge",
-		Headers: auth(t, f.ann), Body: strings.NewReader(`{"kind":"places","keep":"` + f.garage.Id + `","merge":["` + garage2.Id + `"]}`),
+		Headers: asUser(t, f.ann), Body: strings.NewReader(`{"kind":"places","keep":"` + f.garage.Id + `","merge":["` + garage2.Id + `"]}`),
 		ExpectedStatus: 204,
 	})
 	if b, _ := f.app.FindRecordById("places", box.Id); b.GetString("parent") != f.garage.Id {
@@ -312,7 +312,7 @@ func TestMergeDuplicates(t *testing.T) {
 	}
 	run(t, f, tests.ApiScenario{
 		Name: "merge items", Method: http.MethodPost, URL: "/api/whereis/admin/family/merge",
-		Headers: auth(t, f.ann), Body: strings.NewReader(`{"kind":"items","keep":"` + saw2.Id + `","merge":["` + saw.Id + `"]}`),
+		Headers: asUser(t, f.ann), Body: strings.NewReader(`{"kind":"items","keep":"` + saw2.Id + `","merge":["` + saw.Id + `"]}`),
 		ExpectedStatus: 204,
 	})
 	if s, _ := f.app.FindRecordById("items", saw2.Id); s.GetString("note") != "rusty" {
@@ -323,7 +323,7 @@ func TestMergeDuplicates(t *testing.T) {
 	}
 	run(t, f, tests.ApiScenario{
 		Name: "can't merge across households", Method: http.MethodPost, URL: "/api/whereis/admin/family/merge",
-		Headers: auth(t, f.cat), Body: strings.NewReader(`{"kind":"items","keep":"` + saw2.Id + `","merge":["` + f.drill.Id + `"]}`),
+		Headers: asUser(t, f.cat), Body: strings.NewReader(`{"kind":"items","keep":"` + saw2.Id + `","merge":["` + f.drill.Id + `"]}`),
 		ExpectedStatus: 403,
 	})
 }
@@ -337,7 +337,7 @@ func TestFamilyStats(t *testing.T) {
 	}
 	run(t, f, tests.ApiScenario{
 		Name: "stats", Method: http.MethodGet, URL: "/api/whereis/admin/family/stats",
-		Headers: auth(t, f.ann), ExpectedStatus: 200,
+		Headers: asUser(t, f.ann), ExpectedStatus: 200,
 		ExpectedContent: []string{`"items":2`, `"places":2`, `"members":2`, `"unlabeled":2`, `"staleTotal":1`, `"name":"Old lamp"`},
 	})
 }
@@ -348,7 +348,7 @@ func TestSiteSignupSwitch(t *testing.T) {
 	signup := `{"email":"new@example.com","password":"password123","passwordConfirm":"password123"}`
 	run(t, f, tests.ApiScenario{
 		Name: "close sign-up", Method: http.MethodPut, URL: "/api/whereis/admin/site/signup",
-		Headers: auth(t, f.dan), Body: strings.NewReader(`{"open":false}`), ExpectedStatus: 200,
+		Headers: asUser(t, f.dan), Body: strings.NewReader(`{"open":false}`), ExpectedStatus: 200,
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "config says closed", Method: http.MethodGet, URL: "/api/whereis/config",
@@ -360,7 +360,7 @@ func TestSiteSignupSwitch(t *testing.T) {
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "open again", Method: http.MethodPut, URL: "/api/whereis/admin/site/signup",
-		Headers: auth(t, f.dan), Body: strings.NewReader(`{"open":true}`), ExpectedStatus: 200,
+		Headers: asUser(t, f.dan), Body: strings.NewReader(`{"open":true}`), ExpectedStatus: 200,
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "sign-up works", Method: http.MethodPost, URL: "/api/collections/users/records",
@@ -387,7 +387,7 @@ func TestSiteSignupSwitch(t *testing.T) {
 	}
 	(&tests.ApiScenario{
 		Name: "locked by env", Method: http.MethodPut, URL: "/api/whereis/admin/site/signup",
-		Headers: auth(t, dan), Body: strings.NewReader(`{"open":false}`), ExpectedStatus: 400,
+		Headers: asUser(t, dan), Body: strings.NewReader(`{"open":false}`), ExpectedStatus: 400,
 		ExpectedContent:       []string{"ALLOW_SIGNUP"},
 		TestAppFactory:        func(testing.TB) *tests.TestApp { return app },
 		DisableTestAppCleanup: true,
@@ -401,16 +401,16 @@ func TestSiteAccounts(t *testing.T) {
 
 	run(t, f, tests.ApiScenario{
 		Name: "list", Method: http.MethodGet, URL: "/api/whereis/admin/site/users",
-		Headers: auth(t, f.dan), ExpectedStatus: 200,
+		Headers: asUser(t, f.dan), ExpectedStatus: 200,
 		ExpectedContent: []string{`"email":"cat@example.com"`, `"household":"Home"`, `"family_admin":true`, `"site_admin":true`},
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "can't turn off yourself", Method: http.MethodPatch, URL: "/api/whereis/admin/site/users/" + f.dan.Id,
-		Headers: auth(t, f.dan), Body: strings.NewReader(`{"disabled":true}`), ExpectedStatus: 400,
+		Headers: asUser(t, f.dan), Body: strings.NewReader(`{"disabled":true}`), ExpectedStatus: 400,
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "turn off Ann", Method: http.MethodPatch, URL: "/api/whereis/admin/site/users/" + f.ann.Id,
-		Headers: auth(t, f.dan), Body: strings.NewReader(`{"disabled":true}`), ExpectedStatus: 204,
+		Headers: asUser(t, f.dan), Body: strings.NewReader(`{"disabled":true}`), ExpectedStatus: 204,
 	})
 	h, _ := f.app.FindRecordById("households", f.h1.Id)
 	if h.GetString("owner") != f.ben.Id {
@@ -424,7 +424,7 @@ func TestSiteAccounts(t *testing.T) {
 	var pw string
 	run(t, f, tests.ApiScenario{
 		Name: "new password for Ben", Method: http.MethodPost, URL: "/api/whereis/admin/site/users/" + f.ben.Id + "/password",
-		Headers: auth(t, f.dan), ExpectedStatus: 200,
+		Headers: asUser(t, f.dan), ExpectedStatus: 200,
 		AfterTestFunc: func(t testing.TB, app *tests.TestApp, res *http.Response) {
 			var out struct{ Password string }
 			decode(t, res, &out)
@@ -441,7 +441,7 @@ func TestSiteAccounts(t *testing.T) {
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "delete Cat", Method: http.MethodDelete, URL: "/api/whereis/admin/site/users/" + f.cat.Id,
-		Headers: auth(t, f.dan), ExpectedStatus: 204,
+		Headers: asUser(t, f.dan), ExpectedStatus: 204,
 	})
 	if _, err := f.app.FindRecordById("users", f.cat.Id); err == nil {
 		t.Fatal("Cat still exists")
@@ -476,7 +476,7 @@ func TestLastActive(t *testing.T) {
 	}
 	run(t, f, tests.ApiScenario{
 		Name: "users can't set it", Method: http.MethodPatch, URL: "/api/collections/users/records/" + f.ben.Id,
-		Headers: auth(t, f.ben), Body: strings.NewReader(`{"disabled":false}`), ExpectedStatus: 404,
+		Headers: asUser(t, f.ben), Body: strings.NewReader(`{"disabled":false}`), ExpectedStatus: 404,
 	})
 }
 
@@ -485,18 +485,18 @@ func TestSiteMail(t *testing.T) {
 	defer f.app.Cleanup()
 	run(t, f, tests.ApiScenario{
 		Name: "needs a from address", Method: http.MethodPut, URL: "/api/whereis/admin/site/mail",
-		Headers: auth(t, f.dan), Body: strings.NewReader(`{"enabled":true,"host":"smtp.example.com"}`), ExpectedStatus: 400,
+		Headers: asUser(t, f.dan), Body: strings.NewReader(`{"enabled":true,"host":"smtp.example.com"}`), ExpectedStatus: 400,
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "save", Method: http.MethodPut, URL: "/api/whereis/admin/site/mail",
-		Headers:        auth(t, f.dan),
+		Headers:        asUser(t, f.dan),
 		Body:           strings.NewReader(`{"enabled":true,"host":"smtp.example.com","port":465,"tls":true,"username":"u","password":"secret","fromAddress":"whereis@example.com","fromName":"Home"}`),
 		ExpectedStatus: 200, ExpectedContent: []string{`"host":"smtp.example.com"`, `"hasPassword":true`},
 		NotExpectedContent: []string{"secret"},
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "test email", Method: http.MethodPost, URL: "/api/whereis/admin/site/mail/test",
-		Headers: auth(t, f.dan), Body: strings.NewReader(`{}`), ExpectedStatus: 200,
+		Headers: asUser(t, f.dan), Body: strings.NewReader(`{}`), ExpectedStatus: 200,
 		ExpectedContent: []string{`"to":"dan@example.com"`},
 		AfterTestFunc: func(t testing.TB, app *tests.TestApp, res *http.Response) {
 			if app.TestMailer.TotalSend() != 1 || !strings.Contains(app.TestMailer.LastMessage().Subject, "test") {
@@ -511,7 +511,7 @@ func TestSiteMail(t *testing.T) {
 	_ = locked.app.Save(locked.dan)
 	run(t, locked, tests.ApiScenario{
 		Name: "locked by env", Method: http.MethodPut, URL: "/api/whereis/admin/site/mail",
-		Headers: auth(t, locked.dan), Body: strings.NewReader(`{"enabled":false}`), ExpectedStatus: 400,
+		Headers: asUser(t, locked.dan), Body: strings.NewReader(`{"enabled":false}`), ExpectedStatus: 400,
 	})
 }
 
@@ -537,29 +537,29 @@ func TestSiteGoogle(t *testing.T) {
 
 	run(t, f, tests.ApiScenario{
 		Name: "turn on without keys", Method: http.MethodPut, URL: "/api/whereis/admin/site/google",
-		Headers: auth(t, f.dan), Body: strings.NewReader(`{"enabled":true}`), ExpectedStatus: 400,
+		Headers: asUser(t, f.dan), Body: strings.NewReader(`{"enabled":true}`), ExpectedStatus: 400,
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "turn on", Method: http.MethodPut, URL: "/api/whereis/admin/site/google",
-		Headers: auth(t, f.dan), Body: strings.NewReader(`{"enabled":true,"clientId":"id","clientSecret":"right"}`),
+		Headers: asUser(t, f.dan), Body: strings.NewReader(`{"enabled":true,"clientId":"id","clientSecret":"right"}`),
 		ExpectedStatus: 200, ExpectedContent: []string{`"enabled":true`, `"redirectUrl":"https://whereis.example.com/api/oauth2-redirect"`},
 		NotExpectedContent: []string{"right"},
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "check passes", Method: http.MethodPost, URL: "/api/whereis/admin/site/google/check",
-		Headers: auth(t, f.dan), ExpectedStatus: 200, ExpectedContent: []string{`"ok":true`},
+		Headers: asUser(t, f.dan), ExpectedStatus: 200, ExpectedContent: []string{`"ok":true`},
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "wrong secret", Method: http.MethodPut, URL: "/api/whereis/admin/site/google",
-		Headers: auth(t, f.dan), Body: strings.NewReader(`{"enabled":true,"clientSecret":"wrong"}`), ExpectedStatus: 200,
+		Headers: asUser(t, f.dan), Body: strings.NewReader(`{"enabled":true,"clientSecret":"wrong"}`), ExpectedStatus: 200,
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "check fails", Method: http.MethodPost, URL: "/api/whereis/admin/site/google/check",
-		Headers: auth(t, f.dan), ExpectedStatus: 200, ExpectedContent: []string{`"ok":false`, "doesn't accept"},
+		Headers: asUser(t, f.dan), ExpectedStatus: 200, ExpectedContent: []string{`"ok":false`, "doesn't accept"},
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "turn off", Method: http.MethodPut, URL: "/api/whereis/admin/site/google",
-		Headers: auth(t, f.dan), Body: strings.NewReader(`{"enabled":false}`), ExpectedStatus: 200,
+		Headers: asUser(t, f.dan), Body: strings.NewReader(`{"enabled":false}`), ExpectedStatus: 200,
 		ExpectedContent: []string{`"enabled":false`},
 	})
 	// turned off stays off when the server restarts with keys in .env
@@ -578,7 +578,7 @@ func TestBackups(t *testing.T) {
 	var name string
 	run(t, f, tests.ApiScenario{
 		Name: "make one", Method: http.MethodPost, URL: "/api/whereis/admin/site/backups",
-		Headers: auth(t, f.dan), ExpectedStatus: 200,
+		Headers: asUser(t, f.dan), ExpectedStatus: 200,
 		AfterTestFunc: func(t testing.TB, app *tests.TestApp, res *http.Response) {
 			var out struct{ Name string }
 			decode(t, res, &out)
@@ -587,7 +587,7 @@ func TestBackups(t *testing.T) {
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "listed", Method: http.MethodGet, URL: "/api/whereis/admin/site/backups",
-		Headers: auth(t, f.dan), ExpectedStatus: 200, ExpectedContent: []string{`"name":"` + name + `"`},
+		Headers: asUser(t, f.dan), ExpectedStatus: 200, ExpectedContent: []string{`"name":"` + name + `"`},
 	})
 	tok, _ := f.dan.NewFileToken()
 	run(t, f, tests.ApiScenario{
@@ -605,11 +605,11 @@ func TestBackups(t *testing.T) {
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "schedule", Method: http.MethodPut, URL: "/api/whereis/admin/site/backups/schedule",
-		Headers: auth(t, f.dan), Body: strings.NewReader(`{"every":"daily","keep":5}`), ExpectedStatus: 200,
+		Headers: asUser(t, f.dan), Body: strings.NewReader(`{"every":"daily","keep":5}`), ExpectedStatus: 200,
 		ExpectedContent: []string{`"cron":"0 3 * * *"`, `"keep":5`},
 	})
 	run(t, f, tests.ApiScenario{
 		Name: "delete", Method: http.MethodDelete, URL: "/api/whereis/admin/site/backups/" + name,
-		Headers: auth(t, f.dan), ExpectedStatus: 204,
+		Headers: asUser(t, f.dan), ExpectedStatus: 204,
 	})
 }
