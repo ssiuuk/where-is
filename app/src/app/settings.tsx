@@ -41,10 +41,15 @@ export default function Settings() {
     setSyncResult(null);
     try {
       await data.sync();
+    } catch (e) {
+      setSyncResult({ ok: false, text: e instanceof PartialSyncError ? e.message : `Sync failed. ${errorMessage(e)}` });
+      return;
+    }
+    try {
       await s.refresh();
       setSyncResult({ ok: true, text: 'Sync finished. This device now has the latest from the server.' });
     } catch (e) {
-      setSyncResult({ ok: false, text: e instanceof PartialSyncError ? e.message : `Sync failed. ${errorMessage(e)}` });
+      setSyncResult({ ok: false, text: `The lists are up to date, but your account and household details couldn't be refreshed. ${errorMessage(e)}` });
     }
   };
   // keep "5 min ago" current while Settings is open

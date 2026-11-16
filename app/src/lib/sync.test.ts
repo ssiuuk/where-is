@@ -78,3 +78,20 @@ test('a failure while applying the data fails the sync', async () => {
   });
   await assert.rejects(gate.settle(p), /disk full/);
 });
+
+test('a replaced fetch failing does not fail the manual sync when the newer one succeeds', async () => {
+  const gate = latestOnly();
+  const shown: string[] = [];
+  const errors: unknown[] = [];
+  const a = deferred<string>();
+  const b = deferred<string>();
+  const manual = gate.run(() => a.promise, (v) => void shown.push(v), (e) => errors.push(e));
+  gate.run(() => b.promise, (v) => void shown.push(v), (e) => errors.push(e));
+  a.reject(new Error('timed out'));
+  const settled = gate.settle(manual);
+  await new Promise((r) => setTimeout(r, 0));
+  b.resolve('fresh');
+  await settled;
+  assert.deepEqual(shown, ['fresh']);
+  assert.equal(errors.length, 0); // the replaced fetch doesn't mark the app offline
+});

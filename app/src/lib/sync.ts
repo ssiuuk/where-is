@@ -43,9 +43,17 @@ export function latestOnly() {
       p.catch(() => {});
       return p;
     },
-    /** Follows a fetch until one is applied; rejects if the one that counts failed. */
+    /** Follows a fetch until one is applied; rejects only if the newest one, the one that counts, failed. */
     async settle(p: Promise<boolean>): Promise<void> {
-      while (!(await p)) p = newest as Promise<boolean>;
+      for (;;) {
+        try {
+          if (await p) return;
+        } catch (e) {
+          if (p === newest) throw e;
+          // a newer fetch replaced this one: its failure doesn't matter
+        }
+        p = newest as Promise<boolean>;
+      }
     },
   };
 }
