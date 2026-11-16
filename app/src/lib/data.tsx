@@ -3,7 +3,9 @@ import PocketBase, { RecordModel, RecordSubscription } from 'pocketbase';
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 
+import { errorMessage } from './client';
 import { asNames, tagCounts } from './names';
+import { latestOnly, PartialSyncError } from './sync';
 import { parsePlaceInput, PlaceMap, placeLabel, placeMap, resolvePlaceInput } from './places';
 import type { Item, Member, Move, Place } from './types';
 
@@ -114,7 +116,9 @@ export function DataProvider({ pb, household, children }: { pb: PocketBase; hous
   // bumping this re-subscribes to live updates
   const [liveGen, setLiveGen] = useState(0);
   // only the newest fetch may replace the lists, so a slow older one can't undo a newer one
-  const fetchSeq = useRef(0);
+  const gate = useRef(latestOnly()).current;
+  // the offline-copy save of the last applied fetch, which "Sync now" waits for
+  const lastSave = useRef<Promise<void>>(Promise.resolve());
   // photos are protected files: their URLs need a short-lived file token
   const [fileToken, setFileToken] = useState('');
   const fileTokenAt = useRef(0);
@@ -137,29 +141,34 @@ export function DataProvider({ pb, household, children }: { pb: PocketBase; hous
     };
   }, [cacheKey]);
 
-  const fetchAll = useCallback(async () => {
-    const seq = ++fetchSeq.current;
-    try {
-      const filter = pb.filter('household = {:h}', { h: household });
-      const [p, i, m] = await Promise.all([
-        pb.collection('places').getFullList({ filter, batch: 500 }),
-        pb.collection('items').getFullList({ filter, sort: '-updated', batch: 500 }),
-        pb.collection('users').getFullList({ filter }),
-      ]);
-      const next: Cache = { places: p.map(toPlace), items: i.map(toItem), members: m.map(toMember), savedAt: new Date().toISOString() };
-      if (seq !== fetchSeq.current) return;
-      loaded.current = true;
-      setPlaces(next.places);
-      setItems(next.items);
-      setMembers(next.members);
-      setSavedAt(next.savedAt);
-      setStatus('live');
-      AsyncStorage.setItem(cacheKey, JSON.stringify(next)).catch(() => {});
-    } catch (e) {
-      if (seq === fetchSeq.current) setStatus('offline');
-      throw e;
-    }
-  }, [pb, household, cacheKey]);
+  /** Resolves true when its data was shown, false when a newer fetch replaced it; rejects if the server can't be reached. */
+  const fetchAll = useCallback(
+    () =>
+      gate.run(
+        async () => {
+          const filter = pb.filter('household = {:h}', { h: household });
+          const [p, i, m] = await Promise.all([
+            pb.collection('places').getFullList({ filter, batch: 500 }),
+            pb.collection('items').getFullList({ filter, sort: '-updated', batch: 500 }),
+            pb.collection('users').getFullList({ filter }),
+          ]);
+          return { places: p.map(toPlace), items: i.map(toItem), members: m.map(toMember), savedAt: new Date().toISOString() } satisfies Cache;
+        },
+        (next) => {
+          loaded.current = true;
+          setPlaces(next.places);
+          setItems(next.items);
+          setMembers(next.members);
+          setSavedAt(next.savedAt);
+          setStatus('live');
+          const save = AsyncStorage.setItem(cacheKey, JSON.stringify(next));
+          save.catch(() => {});
+          lastSave.current = save;
+        },
+        () => setStatus('offline'),
+      ),
+    [gate, pb, household, cacheKey],
+  );
 
   const reload = useCallback(async () => {
     try {
@@ -231,8 +240,9 @@ export function DataProvider({ pb, household, children }: { pb: PocketBase; hous
       const token = await pb.files.getToken();
       fileTokenAt.current = Date.now();
       setFileToken(token);
-    } catch {
-      // offline: photos show again once the server can be reached
+    } catch (e) {
+      // offline: photos show again once the server can be reached. "Sync now" wants to know.
+      if (force) throw e;
     }
   }, [pb]);
   useEffect(() => {
@@ -250,14 +260,24 @@ export function DataProvider({ pb, household, children }: { pb: PocketBase; hous
   const sync = useCallback(async () => {
     setSyncing(true);
     try {
-      await fetchAll();
+      // if the app also refreshed meanwhile (e.g. coming back to the foreground), the newest fetch decides
+      await gate.settle(fetchAll());
       // the live connection may have dropped while the server was away; start it again
       if (!pb.realtime.isConnected) setLiveGen((g) => g + 1);
-      await renewFileToken(true);
+      try {
+        await lastSave.current;
+      } catch (e) {
+        throw new PartialSyncError(`The lists are up to date, but this device couldn't save its offline copy (${errorMessage(e)}). Search may show older places when the server can't be reached.`);
+      }
+      try {
+        await renewFileToken(true);
+      } catch (e) {
+        throw new PartialSyncError(`The lists are up to date, but photos couldn't be refreshed. ${errorMessage(e)}`);
+      }
     } finally {
       setSyncing(false);
     }
-  }, [pb, fetchAll, renewFileToken]);
+  }, [gate, pb, fetchAll, renewFileToken]);
 
   const photoUrl = useCallback(
     (item: Item, thumb?: '200x200' | '800x0') => {

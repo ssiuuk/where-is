@@ -14,3 +14,41 @@ export function syncStatusText(s: { syncing: boolean; status: 'loading' | 'live'
   if (s.status === 'loading') return when ? `Checking the server… Last synced ${when}.` : 'Checking the server…';
   return when ? `Connected to the server. Last full sync ${when}.` : 'Connected to the server.';
 }
+
+/**
+ * Runs fetches so that only the newest one may change what's shown: an older one that finishes
+ * later is dropped. `settle` waits for whichever fetch finally counts, so a manual sync reports
+ * success only when fresh data was really applied, and fails if the newest fetch failed.
+ */
+export function latestOnly() {
+  let seq = 0;
+  let newest: Promise<boolean> | null = null;
+  return {
+    /** Resolves true once applied, false if a newer fetch replaced it; rejects with the fetch's error. */
+    run<T>(fetch: () => Promise<T>, apply: (v: T) => void | Promise<void>, onError?: (e: unknown) => void): Promise<boolean> {
+      const mine = ++seq;
+      const p = (async () => {
+        try {
+          const v = await fetch();
+          if (mine !== seq) return false;
+          await apply(v);
+          return true;
+        } catch (e) {
+          if (mine === seq) onError?.(e);
+          throw e;
+        }
+      })();
+      newest = p;
+      // nobody may be waiting on an older fetch
+      p.catch(() => {});
+      return p;
+    },
+    /** Follows a fetch until one is applied; rejects if the one that counts failed. */
+    async settle(p: Promise<boolean>): Promise<void> {
+      while (!(await p)) p = newest as Promise<boolean>;
+    },
+  };
+}
+
+/** "Sync now" got fresh lists but a later step failed: shown as a warning, not "Sync failed". */
+export class PartialSyncError extends Error {}

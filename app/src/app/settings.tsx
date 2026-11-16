@@ -8,7 +8,7 @@ import { Body, Button, Card, ConfirmRow, ErrorText, Field, Heading } from '@/com
 import { errorMessage } from '@/lib/client';
 import { useData } from '@/lib/data';
 import { PasswordChangedError, useMember } from '@/lib/session';
-import { syncStatusText } from '@/lib/sync';
+import { PartialSyncError, syncStatusText } from '@/lib/sync';
 
 export default function Settings() {
   const c = useColors();
@@ -44,7 +44,7 @@ export default function Settings() {
       await s.refresh();
       setSyncResult({ ok: true, text: 'Sync finished. This device now has the latest from the server.' });
     } catch (e) {
-      setSyncResult({ ok: false, text: `Sync failed. ${errorMessage(e)}` });
+      setSyncResult({ ok: false, text: e instanceof PartialSyncError ? e.message : `Sync failed. ${errorMessage(e)}` });
     }
   };
   // keep "5 min ago" current while Settings is open
