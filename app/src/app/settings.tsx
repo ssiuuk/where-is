@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, Share, Text, View } from 'react-native';
 
 import { font, space, useColors } from '@/components/theme';
@@ -37,19 +37,30 @@ export default function Settings() {
 
   // "Sync now": fetch everything again, plus the household and your roles
   const [syncResult, setSyncResult] = useState<null | { ok: boolean; text: string }>(null);
+  // busy until both the lists and the account refresh are done, so syncs can't overlap
+  const [syncBusy, setSyncBusy] = useState(false);
+  const syncRunning = useRef(false);
   const syncNow = async () => {
+    if (syncRunning.current) return;
+    syncRunning.current = true;
+    setSyncBusy(true);
     setSyncResult(null);
     try {
-      await data.sync();
-    } catch (e) {
-      setSyncResult({ ok: false, text: e instanceof PartialSyncError ? e.message : `Sync failed. ${errorMessage(e)}` });
-      return;
-    }
-    try {
-      await s.refresh();
-      setSyncResult({ ok: true, text: 'Sync finished. This device now has the latest from the server.' });
-    } catch (e) {
-      setSyncResult({ ok: false, text: `The lists are up to date, but your account and household details couldn't be refreshed. ${errorMessage(e)}` });
+      try {
+        await data.sync();
+      } catch (e) {
+        setSyncResult({ ok: false, text: e instanceof PartialSyncError ? e.message : `Sync failed. ${errorMessage(e)}` });
+        return;
+      }
+      try {
+        await s.refresh();
+        setSyncResult({ ok: true, text: 'Sync finished. This device now has the latest from the server.' });
+      } catch (e) {
+        setSyncResult({ ok: false, text: `The lists are up to date, but your account and household details couldn't be refreshed. ${errorMessage(e)}` });
+      }
+    } finally {
+      syncRunning.current = false;
+      setSyncBusy(false);
     }
   };
   // keep "5 min ago" current while Settings is open
@@ -120,13 +131,13 @@ export default function Settings() {
 
       <Card>
         <Heading>Sync</Heading>
-        <Body muted>{syncStatusText(data)}</Body>
+        <Body muted>{syncStatusText({ ...data, syncing: syncBusy || data.syncing })}</Body>
         <Body muted>
           Search keeps working from the copy saved on this device when the server can't be reached. Changes are sent to the server
           straight away, so syncing never loses anything.
         </Body>
-        <Button kind="secondary" icon="sync" title="Sync now" busy={data.syncing} onPress={syncNow} />
-        {syncResult && !data.syncing ? syncResult.ok ? <Body>{syncResult.text}</Body> : <ErrorText>{syncResult.text}</ErrorText> : null}
+        <Button kind="secondary" icon="sync" title="Sync now" busy={syncBusy || data.syncing} onPress={syncNow} />
+        {syncResult && !syncBusy ? syncResult.ok ? <Body>{syncResult.text}</Body> : <ErrorText>{syncResult.text}</ErrorText> : null}
       </Card>
 
       {s.roles.family || s.roles.site || s.roles.siteNeedsVerify ? (
