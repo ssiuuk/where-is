@@ -7,7 +7,18 @@ import type { Item } from '@/lib/types';
 import { font, radius, space, useColors } from './theme';
 import { Icon, Tape } from './ui';
 
-export function ItemRow({ item, onPress, right }: { item: Item; onPress: () => void; right?: React.ReactNode }) {
+export function ItemRow({
+  item,
+  onPress,
+  right,
+  alias,
+}: {
+  item: Item;
+  onPress: () => void;
+  right?: React.ReactNode;
+  /** the other name a search matched, shown under the name */
+  alias?: string;
+}) {
   const c = useColors();
   const { label, photoUrl, memberName } = useData();
   const photo = photoUrl(item, '200x200');
@@ -37,7 +48,17 @@ export function ItemRow({ item, onPress, right }: { item: Item; onPress: () => v
         <Text numberOfLines={1} style={{ color: c.text, fontSize: font.body, fontWeight: '600' }}>
           {item.name}
         </Text>
+        {alias ? (
+          <Text numberOfLines={1} style={{ color: c.muted, fontSize: 12 }}>
+            {`Also called ${alias}`}
+          </Text>
+        ) : null}
         <Tape text={label(item.place)} />
+        {item.tags?.length ? (
+          <Text numberOfLines={1} style={{ color: c.accent, fontSize: 12, fontWeight: '600' }}>
+            {item.tags.map((t) => `#${t}`).join('  ')}
+          </Text>
+        ) : null}
         {item.moved_at ? (
           <Text numberOfLines={1} style={{ color: c.muted, fontSize: 12 }}>
             {`Put there ${timeAgo(item.moved_at)}${who ? ` by ${who}` : ''}`}

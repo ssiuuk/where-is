@@ -2,6 +2,7 @@ import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Image, ScrollView, Text, View } from 'react-native';
 
+import { Chip, ItemNamesFields, useItemNames } from '@/components/NamesField';
 import { OpenInApp } from '@/components/OpenInApp';
 import { PhotoField } from '@/components/PhotoField';
 import { PlacePicker } from '@/components/PlacePicker';
@@ -67,7 +68,7 @@ export default function ItemScreen() {
       <OpenInApp kind="i" id={item.id} />
       {editing ? (
         <EditItem
-          initial={{ name: item.name, note: item.note }}
+          initial={{ name: item.name, note: item.note, tags: item.tags, aliases: item.aliases }}
           photo={photo}
           busy={busy === 'save'}
           onCancel={() => setEditing(false)}
@@ -96,6 +97,19 @@ export default function ItemScreen() {
               }}
             />
           </Card>
+          {item.aliases.length ? <Body muted>{`Also called ${item.aliases.join(', ')}`}</Body> : null}
+          {item.tags.length ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
+              {item.tags.map((t) => (
+                <Chip
+                  key={t}
+                  text={`#${t}`}
+                  accessibilityLabel={`Show everything tagged ${t}`}
+                  onPress={() => router.dismissTo({ pathname: '/', params: { tag: t } })}
+                />
+              ))}
+            </View>
+          ) : null}
           {item.note ? (
             <Card>
               <Heading>Note</Heading>
@@ -126,7 +140,7 @@ export default function ItemScreen() {
 
       {!editing ? (
         <View style={{ gap: space.sm, marginTop: space.md }}>
-          <Button kind="secondary" icon="pencil-outline" title="Edit name, note or photo" onPress={() => setEditing(true)} />
+          <Button kind="secondary" icon="pencil-outline" title="Edit name, tags, note or photo" onPress={() => setEditing(true)} />
           <Button
             kind="secondary"
             icon="tag-outline"
@@ -171,15 +185,16 @@ function EditItem({
   onCancel,
   onError,
 }: {
-  initial: { name: string; note: string };
+  initial: { name: string; note: string; tags: string[]; aliases: string[] };
   photo: string;
   busy: boolean;
-  onSave: (patch: { name: string; note: string }, photo: Photo | null | undefined) => void;
+  onSave: (patch: { name: string; note: string; tags: string[]; aliases: string[] }, photo: Photo | null | undefined) => void;
   onCancel: () => void;
   onError: (m: string) => void;
 }) {
   const [name, setName] = useState(initial.name);
   const [note, setNote] = useState(initial.note);
+  const names = useItemNames(initial);
   // undefined keeps the photo, null removes it, a Photo replaces it
   const [newPhoto, setNewPhoto] = useState<Photo | null | undefined>(undefined);
   const shown = newPhoto === undefined ? photo : newPhoto === null ? '' : newPhoto.uri;
@@ -187,9 +202,17 @@ function EditItem({
     <View style={{ gap: space.md }}>
       <Field label="Name" value={name} onChangeText={setName} />
       <Field label="Note" value={note} onChangeText={setNote} multiline />
+      <ItemNamesFields names={names} />
       <PhotoField shown={shown} onPick={setNewPhoto} onRemove={() => setNewPhoto(null)} onError={onError} />
       <View style={{ flexDirection: 'row', gap: space.sm }}>
-        <Button title="Save" onPress={() => onSave({ name, note }, newPhoto)} busy={busy} disabled={!name.trim()} style={{ flex: 1 }} />
+        <Button
+          title="Save"
+          onPress={() => {
+            const { tags, aliases, problem } = names.result();
+            if (problem) onError(problem);
+            else onSave({ name, note, tags, aliases }, newPhoto);
+          }}
+          busy={busy} disabled={!name.trim()} style={{ flex: 1 }} />
         <Button kind="secondary" title="Cancel" onPress={onCancel} style={{ flex: 1 }} />
       </View>
     </View>

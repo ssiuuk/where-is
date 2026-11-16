@@ -5,6 +5,7 @@ A phone app for remembering where your family put things. Everyone in the househ
 - **Find:** type "passport" and see where it is, who put it there and when.
 - **Put away:** stick a QR label or NFC sticker on a shelf, drawer or box. Scan or tap it, then tap the things you put there.
 - **Two-tap move:** label something that moves around (a toolbox, the drill). Scan it, then scan the place you put it.
+- **Tags and other names:** tag things (#tools, #christmas) and tap a tag to see everything with it. Add the other names people use ("Hoover" for the vacuum) so search finds them under any name. Start a search word with # to match tags only.
 - **History:** every move is recorded, so "it used to be in the loft" is one tap away.
 - **Offline:** the last list stays on the phone, so you can still look things up when the server can't be reached.
 - **Web:** the same app runs in any browser at your server's address, for use on a computer or an iPhone until the iPhone app exists.

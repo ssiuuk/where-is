@@ -2,6 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 
+import { ItemNamesFields, useItemNames } from '@/components/NamesField';
 import { PhotoField } from '@/components/PhotoField';
 import { PlacePicker } from '@/components/PlacePicker';
 import { space } from '@/components/theme';
@@ -14,6 +15,7 @@ export default function NewItem() {
   const { addItem, label } = useData();
   const [name, setName] = useState(params.name ?? '');
   const [note, setNote] = useState('');
+  const names = useItemNames();
   const [place, setPlace] = useState(params.place ?? '');
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [picking, setPicking] = useState(false);
@@ -26,17 +28,24 @@ export default function NewItem() {
       setError('Give it a name, like “Passport” or “Spare bike lights”.');
       return;
     }
+    const { tags, aliases, problem } = names.result();
+    if (problem) {
+      setError(problem);
+      return;
+    }
     setBusy(then);
     setError('');
     try {
-      const item = await addItem({ name, note, place, photo });
+      const item = await addItem({ name, note, tags, aliases, place, photo });
       if (then === 'done') {
         router.back();
       } else {
-        // keep the place: people usually add several things from one shelf
+        // keep the place and tags: people usually add several similar things from one shelf
         setSaved(`Saved ${item.name}.`);
         setName('');
         setNote('');
+        names.reset(true);
+        names.setTags(tags);
         setPhoto(null);
       }
     } catch (e) {
@@ -54,6 +63,7 @@ export default function NewItem() {
       <Tape text={label(place)} empty="No place yet" onPress={() => setPicking(true)} />
       <Button kind="secondary" icon="map-marker-outline" title={place ? 'Change place' : 'Choose place'} onPress={() => setPicking(true)} />
       <Field label="Note (optional)" value={note} onChangeText={setNote} multiline placeholder="e.g. in the blue folder, both passports" />
+      <ItemNamesFields names={names} />
       <Heading>Photo (optional)</Heading>
       <PhotoField shown={photo?.uri ?? ''} onPick={setPhoto} onRemove={() => setPhoto(null)} onError={setError} />
       <ErrorText>{error}</ErrorText>
