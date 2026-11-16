@@ -1,10 +1,13 @@
 import QRCode from 'qrcode';
 
+export const QUIET_ZONE = 4;
+
 /** A QR code as an SVG string, one path, black on white. */
 export function qrSvg(text: string, size = 160): string {
   const { modules } = QRCode.create(text, { errorCorrectionLevel: 'M' });
   const n = modules.size;
-  const quiet = 2;
+  // the QR spec asks for a blank margin of at least 4 modules on every side
+  const quiet = QUIET_ZONE;
   let d = '';
   for (let y = 0; y < n; y++) {
     for (let x = 0; x < n; x++) {

@@ -197,7 +197,7 @@ func bindAdminHooks(app core.App, cfg Config) {
 		return e.App.RunInTransaction(func(tx core.App) error {
 			e.App = tx
 			if err := moveToTrash(tx, e.Record, by); err != nil {
-				return err
+				return e.BadRequestError("Couldn't put it in the recycle bin, so it wasn't deleted. Try again.", err)
 			}
 			if err := e.Next(); err != nil {
 				return err

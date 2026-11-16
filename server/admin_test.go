@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
+	"github.com/pocketbase/pocketbase/tools/filesystem"
 )
 
 // adminFixture: Ann owns household 1 (family admin), Ben is a member, and
@@ -611,5 +613,79 @@ func TestBackups(t *testing.T) {
 	run(t, f, tests.ApiScenario{
 		Name: "delete", Method: http.MethodDelete, URL: "/api/whereis/admin/site/backups/" + name,
 		Headers: asUser(t, f.dan), ExpectedStatus: 204,
+	})
+}
+
+// drillWithPhoto gives the fixture's drill a tiny PNG photo.
+func drillWithPhoto(t *testing.T, f *fixture) {
+	t.Helper()
+	file, err := filesystem.NewFileFromBytes([]byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?\x03\x00\x08\xfc\x02\xfe\xa7\x9a\xa0\xa0\x00\x00\x00\x00IEND\xaeB`\x82"), "drill.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.drill.Set("photo", file)
+	if err := f.app.Save(f.drill); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRecycleBinKeepsPhotos(t *testing.T) {
+	f := adminFixture(t)
+	defer f.app.Cleanup()
+	drillWithPhoto(t, f)
+
+	run(t, f, tests.ApiScenario{
+		Name: "delete", Method: http.MethodDelete, URL: "/api/collections/items/records/" + f.drill.Id,
+		Headers: asUser(t, f.ben), ExpectedStatus: 204,
+	})
+	trash, err := f.app.FindFirstRecordByData("trash", "record", f.drill.Id)
+	if err != nil || trash.GetString("photo") == "" {
+		t.Fatal("the photo didn't go into the recycle bin")
+	}
+	run(t, f, tests.ApiScenario{
+		Name: "restore", Method: http.MethodPost, URL: "/api/whereis/admin/family/trash/" + trash.Id + "/restore",
+		Headers: asUser(t, f.ann), ExpectedStatus: 204,
+	})
+	item, err := f.app.FindRecordById("items", f.drill.Id)
+	if err != nil || item.GetString("photo") == "" {
+		t.Fatal("the photo didn't come back")
+	}
+	fsys, _ := f.app.NewFilesystem()
+	defer fsys.Close()
+	if ok, _ := fsys.Exists(item.BaseFilesPath() + "/" + item.GetString("photo")); !ok {
+		t.Fatal("the restored photo file is missing")
+	}
+}
+
+func TestDeleteFailsIfPhotoCantBeKept(t *testing.T) {
+	f := adminFixture(t)
+	defer f.app.Cleanup()
+	drillWithPhoto(t, f)
+
+	real := readStoredFile
+	readStoredFile = func(core.App, *core.Record, string) (*filesystem.File, error) {
+		return nil, errors.New("disk hiccup")
+	}
+	defer func() { readStoredFile = real }()
+
+	run(t, f, tests.ApiScenario{
+		Name: "delete refused", Method: http.MethodDelete, URL: "/api/collections/items/records/" + f.drill.Id,
+		Headers: asUser(t, f.ben), ExpectedStatus: 400, ExpectedContent: []string{"recycle bin"},
+	})
+	if _, err := f.app.FindRecordById("items", f.drill.Id); err != nil {
+		t.Fatal("the item was deleted although its photo wasn't kept")
+	}
+	if n, _ := f.app.CountRecords("trash"); n != 0 {
+		t.Fatalf("%d half-made recycle bin entries", n)
+	}
+
+	// a photo whose file is already gone doesn't block the delete
+	readStoredFile = real
+	fsys, _ := f.app.NewFilesystem()
+	_ = fsys.Delete(f.drill.BaseFilesPath() + "/" + f.drill.GetString("photo"))
+	fsys.Close()
+	run(t, f, tests.ApiScenario{
+		Name: "delete with the file already gone", Method: http.MethodDelete, URL: "/api/collections/items/records/" + f.drill.Id,
+		Headers: asUser(t, f.ben), ExpectedStatus: 204,
 	})
 }

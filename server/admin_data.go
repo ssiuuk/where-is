@@ -463,15 +463,24 @@ func mergePlace(tx core.App, keep, src *core.Record) error {
 	return nil
 }
 
+// errFileGone means the stored file no longer exists, so there is nothing
+// left to keep (unlike a read error, which might pass).
+var errFileGone = errors.New("the file is gone")
+
 // readStoredFile copies a record's stored file into memory, so it can be
 // attached to another record even after the original is deleted.
-func readStoredFile(app core.App, rec *core.Record, name string) (*filesystem.File, error) {
+// It is a variable so tests can make reading fail.
+var readStoredFile = func(app core.App, rec *core.Record, name string) (*filesystem.File, error) {
 	fsys, err := app.NewFilesystem()
 	if err != nil {
 		return nil, err
 	}
 	defer fsys.Close()
-	r, err := fsys.GetReader(rec.BaseFilesPath() + "/" + name)
+	key := rec.BaseFilesPath() + "/" + name
+	if ok, err := fsys.Exists(key); err == nil && !ok {
+		return nil, errFileGone
+	}
+	r, err := fsys.GetReader(key)
 	if err != nil {
 		return nil, err
 	}
@@ -512,10 +521,16 @@ func moveToTrash(app core.App, rec *core.Record, by string) error {
 		}
 		data["moves"] = history
 		if photo := rec.GetString("photo"); photo != "" {
-			if f, err := readStoredFile(app, rec, photo); err == nil {
+			// the bin must be able to give the photo back: if it can't be
+			// copied, the delete fails rather than lose it
+			f, err := readStoredFile(app, rec, photo)
+			switch {
+			case err == nil:
 				t.Set("photo", f)
-			} else {
-				app.Logger().Warn("couldn't keep the photo of a deleted item", "item", rec.Id, "error", err)
+			case errors.Is(err, errFileGone):
+				app.Logger().Warn("deleted item's photo was already missing", "item", rec.Id)
+			default:
+				return fmt.Errorf("couldn't keep the item's photo in the recycle bin, so it wasn't deleted: %w", err)
 			}
 		}
 	} else {
@@ -626,8 +641,13 @@ func restoreRecord(tx core.App, t *core.Record) error {
 		}
 	}
 	if photo := t.GetString("photo"); photo != "" && collection == "items" {
-		if f, err := readStoredFile(tx, t, photo); err == nil {
+		// same the other way: don't empty the bin entry without its photo
+		f, err := readStoredFile(tx, t, photo)
+		switch {
+		case err == nil:
 			r.Set("photo", f)
+		case !errors.Is(err, errFileGone):
+			return fmt.Errorf("couldn't read the photo back: %w", err)
 		}
 	}
 	if err := tx.Save(r); err != nil {
