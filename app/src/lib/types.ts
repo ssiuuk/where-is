@@ -5,6 +5,9 @@ export type Place = {
   note: string;
   parent: string; // "" for a top-level place
   updated: string;
+  /** when a QR label was printed or an NFC sticker written for it ("" if never) */
+  label_at?: string;
+  nfc_at?: string;
 };
 
 export type Item = {

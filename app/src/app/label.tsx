@@ -45,10 +45,11 @@ export default function Label() {
         a.href = dataUri;
         a.download = `where-is-${name.replace(/[^\w-]+/g, '-').toLowerCase()}.png`;
         a.click();
-        return;
+      } else {
+        const uri = await captureRef(labelRef, { format: 'png', quality: 1, result: 'tmpfile' });
+        await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: `Label for ${name}` });
       }
-      const uri = await captureRef(labelRef, { format: 'png', quality: 1, result: 'tmpfile' });
-      await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: `Label for ${name}` });
+      if (place) data.markLabeled([place.id], 'label');
     } catch (e) {
       setError(`Couldn't make the image: ${(e as Error).message}`);
     }
@@ -60,6 +61,7 @@ export default function Label() {
     try {
       await writeTag(url);
       setNfc('done');
+      if (place) data.markLabeled([place.id], 'nfc');
     } catch (e) {
       const msg = (e as Error)?.message ?? '';
       setNfc('ready');

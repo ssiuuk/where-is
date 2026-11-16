@@ -35,6 +35,12 @@ type Config struct {
 	// sign-in). Existing accounts still sign in, and a superuser can still
 	// create accounts in the dashboard. Set with ALLOW_SIGNUP=false.
 	SignupClosed bool
+	// SignupLocked is true when ALLOW_SIGNUP is set at all: .env then decides,
+	// and the site admin's switch is shown but can't be changed.
+	SignupLocked bool
+	// AdminEmails (ADMIN_EMAILS, comma separated, lowercased) are the site
+	// admins: whoever signs in with one of these verified emails.
+	AdminEmails []string
 	// AppDownloadURL is where the tag landing page sends people without the app.
 	AppDownloadURL string
 	// WebDir holds the web version of the app (the output of
@@ -84,6 +90,14 @@ func ConfigFromEnv(getenv func(string) string) Config {
 	switch strings.ToLower(strings.TrimSpace(getenv("ALLOW_SIGNUP"))) {
 	case "false", "0", "no", "off":
 		c.SignupClosed = true
+		c.SignupLocked = true
+	case "true", "1", "yes", "on":
+		c.SignupLocked = true
+	}
+	for _, email := range strings.Split(getenv("ADMIN_EMAILS"), ",") {
+		if email = strings.ToLower(strings.TrimSpace(email)); email != "" {
+			c.AdminEmails = append(c.AdminEmails, email)
+		}
 	}
 	c.AppDownloadURL = strings.TrimSpace(getenv("APP_DOWNLOAD_URL"))
 	if c.AppDownloadURL == "" {
@@ -132,8 +146,9 @@ func Register(app core.App, cfg Config) {
 
 		// public: what the sign-in screen should offer
 		se.Router.GET("/api/whereis/config", func(e *core.RequestEvent) error {
-			return e.JSON(http.StatusOK, map[string]any{"signup": !cfg.SignupClosed})
+			return e.JSON(http.StatusOK, map[string]any{"signup": signupOpen(e.App, cfg)})
 		})
+		registerAdminRoutes(se, cfg)
 
 		se.Router.GET("/.well-known/assetlinks.json", assetLinks(cfg))
 		if hasWebApp(cfg.WebDir) {
@@ -148,20 +163,19 @@ func Register(app core.App, cfg Config) {
 		return se.Next()
 	})
 
-	if cfg.SignupClosed {
-		app.OnRecordCreateRequest("users").BindFunc(func(e *core.RecordRequestEvent) error {
-			if e.HasSuperuserAuth() {
-				return e.Next()
-			}
-			return e.ForbiddenError(errSignupClosed, nil)
-		})
-		app.OnRecordAuthWithOAuth2Request("users").BindFunc(func(e *core.RecordAuthWithOAuth2RequestEvent) error {
-			if e.IsNewRecord {
-				return e.ForbiddenError(errSignupClosed, nil)
-			}
+	// new accounts: ALLOW_SIGNUP in .env, or the site admin's switch
+	app.OnRecordCreateRequest("users").BindFunc(func(e *core.RecordRequestEvent) error {
+		if e.HasSuperuserAuth() || signupOpen(e.App, cfg) {
 			return e.Next()
-		})
-	}
+		}
+		return e.ForbiddenError(errSignupClosed, nil)
+	})
+	app.OnRecordAuthWithOAuth2Request("users").BindFunc(func(e *core.RecordAuthWithOAuth2RequestEvent) error {
+		if e.IsNewRecord && !signupOpen(e.App, cfg) {
+			return e.ForbiddenError(errSignupClosed, nil)
+		}
+		return e.Next()
+	})
 
 	// places and items must only point at records of the same household
 	app.OnRecordCreateRequest("places").BindFunc(checkPlace)
@@ -170,6 +184,9 @@ func Register(app core.App, cfg Config) {
 
 	app.OnRecordCreateRequest("items").BindFunc(trackMove)
 	app.OnRecordUpdateRequest("items").BindFunc(trackMove)
+
+	// after the checks above: activity log, recycle bin, turned-off accounts
+	bindAdminHooks(app, cfg)
 }
 
 func hasWebApp(dir string) bool {
@@ -272,6 +289,9 @@ func joinHousehold(e *core.RequestEvent) error {
 	if err != nil {
 		return e.NotFoundError("No household has that invite code. Check it with the person who sent it.", nil)
 	}
+	if h.GetBool("invites_off") && e.Auth.GetString("household") != h.Id {
+		return e.ForbiddenError("That household isn't taking new members right now. Ask its family admin to turn invites back on.", nil)
+	}
 	err = e.App.RunInTransaction(func(tx core.App) error {
 		user, err := tx.FindRecordById("users", e.Auth.Id)
 		if err != nil {
@@ -302,8 +322,14 @@ func leaveHousehold(e *core.RequestEvent) error {
 	if err != nil {
 		return err
 	}
-	user.Set("household", "")
-	if err := e.App.Save(user); err != nil {
+	err = e.App.RunInTransaction(func(tx core.App) error {
+		if err := handOverIfOwner(tx, user); err != nil {
+			return err
+		}
+		user.Set("household", "")
+		return tx.Save(user)
+	})
+	if err != nil {
 		return e.InternalServerError("Couldn't leave the household.", err)
 	}
 	return e.NoContent(http.StatusNoContent)
@@ -499,6 +525,8 @@ func moveItems(e *core.RequestEvent) error {
 				if err := saveMove(tx, item, from, body.Place, user.Id); err != nil {
 					return err
 				}
+				logActivity(tx, household, user.Id, "moved", "item", item.Id, item.GetString("name"),
+					placeOrNone(tx, from)+" → "+placeOrNone(tx, body.Place))
 			}
 			moved = append(moved, item)
 		}
@@ -573,7 +601,8 @@ func applyGoogleConfig(app core.App, cfg Config) error {
 			ClientSecret: cfg.GoogleClientSecret,
 		})
 	}
-	users.OAuth2.Enabled = true
+	// the site admin can turn Google sign-in off from the admin screen
+	users.OAuth2.Enabled = !googleTurnedOff(app)
 	if err := app.Save(users); err != nil {
 		return errors.Join(errors.New("couldn't turn on Google sign-in"), err)
 	}
