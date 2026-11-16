@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 
@@ -52,6 +53,7 @@ export default function HouseholdSetup() {
         <Button kind="secondary" title="Create household" onPress={() => run('create')} busy={busy === 'create'} disabled={!!busy || !name.trim()} />
       </Card>
       <View>
+        {s.roles.site ? <Button kind="plain" icon="shield-account-outline" title="Site admin tools" onPress={() => router.push('/admin')} /> : null}
         <Button kind="plain" title={`Sign out${s.user?.email ? ` (${s.user.email})` : ''}`} onPress={s.signOut} />
       </View>
     </ScrollView>

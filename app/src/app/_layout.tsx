@@ -52,6 +52,22 @@ function Navigator() {
           <Stack.Screen name="scan" options={{ title: 'Scan a label' }} />
           <Stack.Screen name="label" options={{ title: 'Label' }} />
           <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+          {/* family admin: the household's tools (the server checks the role too) */}
+          <Stack.Screen name="admin/members" options={{ title: 'Members and invites' }} />
+          <Stack.Screen name="admin/data" options={{ title: 'Import and export' }} />
+          <Stack.Screen name="admin/duplicates" options={{ title: 'Merge duplicates' }} />
+          <Stack.Screen name="admin/trash" options={{ title: 'Recycle bin' }} />
+          <Stack.Screen name="admin/printout" options={{ title: 'Print where everything is' }} />
+          <Stack.Screen name="admin/labels" options={{ title: 'Labels' }} />
+          <Stack.Screen name="admin/activity" options={{ title: 'Activity' }} />
+          <Stack.Screen name="admin/stats" options={{ title: 'Stats' }} />
+        </Stack.Protected>
+        {/* site admin tools work with or without a household */}
+        <Stack.Protected guard={stage !== 'welcome'}>
+          <Stack.Screen name="admin/index" options={{ title: 'Admin' }} />
+          <Stack.Screen name="admin/accounts" options={{ title: 'Accounts' }} />
+          <Stack.Screen name="admin/server" options={{ title: 'Server settings' }} />
+          <Stack.Screen name="admin/backups" options={{ title: 'Backups' }} />
         </Stack.Protected>
         <Stack.Protected guard={stage === 'household'}>
           <Stack.Screen name="household" options={{ title: 'Your household' }} />

@@ -31,7 +31,9 @@ type Data = {
   addPlace(name: string, parent: string): Promise<Place>;
   /** Finds or creates the places typed as "Garage > Shelf 3", returning the deepest one's id. */
   ensurePlace(text: string, insideId?: string): Promise<string>;
-  updatePlace(id: string, patch: Partial<Pick<Place, 'name' | 'note' | 'parent'>>): Promise<Place>;
+  updatePlace(id: string, patch: Partial<Pick<Place, 'name' | 'note' | 'parent' | 'label_at' | 'nfc_at'>>): Promise<Place>;
+  /** Notes that labels were printed (or stickers written) for these places, so the admin can see which still need one. */
+  markLabeled(ids: string[], how: 'label' | 'nfc'): Promise<void>;
   deletePlace(id: string): Promise<void>;
   history(itemId: string): Promise<Move[]>;
   /** The item someone picked up (scanned or chose "Move with a label") and is about to put somewhere. */
@@ -52,7 +54,7 @@ function pick<T>(r: RecordModel, keys: (keyof T)[]): T {
   for (const k of keys) out[k as string] = r[k as string] ?? '';
   return out as T;
 }
-const toPlace = (r: RecordModel) => pick<Place>(r, ['id', 'household', 'name', 'note', 'parent', 'updated']);
+const toPlace = (r: RecordModel) => pick<Place>(r, ['id', 'household', 'name', 'note', 'parent', 'updated', 'label_at', 'nfc_at']);
 const toItem = (r: RecordModel): Item => ({
   ...pick<Item>(r, ['id', 'household', 'name', 'note', 'photo', 'place', 'moved_by', 'moved_at', 'updated', 'collectionId']),
   // null on items saved before tags existed, and missing from older offline copies
@@ -315,6 +317,22 @@ export function DataProvider({ pb, household, children }: { pb: PocketBase; hous
     [pb],
   );
 
+  const markLabeled = useCallback<Data['markLabeled']>(
+    async (ids, how) => {
+      const now = new Date().toISOString().replace('T', ' ');
+      const field = how === 'nfc' ? 'nfc_at' : 'label_at';
+      // one at a time is fine: a sheet of labels is tens of places, not thousands
+      for (const id of ids) {
+        try {
+          await updatePlace(id, { [field]: now });
+        } catch {
+          // a place deleted meanwhile, or offline: the label itself still works
+        }
+      }
+    },
+    [updatePlace],
+  );
+
   const history = useCallback<Data['history']>(
     async (itemId) => {
       const list = await pb.collection('moves').getList(1, 20, {
@@ -329,11 +347,11 @@ export function DataProvider({ pb, household, children }: { pb: PocketBase; hous
   const value = useMemo<Data>(
     () => ({
       status, savedAt, places, items, members, map, tags, label, memberName, photoUrl, reload,
-      addItem, updateItem, moveItems, deleteItem, addPlace, ensurePlace, updatePlace, deletePlace, history,
+      addItem, updateItem, moveItems, deleteItem, addPlace, ensurePlace, updatePlace, deletePlace, markLabeled, history,
       carrying, setCarrying,
     }),
     [status, savedAt, places, items, members, map, tags, label, memberName, photoUrl, reload,
-      addItem, updateItem, moveItems, deleteItem, addPlace, ensurePlace, updatePlace, deletePlace, history, carrying],
+      addItem, updateItem, moveItems, deleteItem, addPlace, ensurePlace, updatePlace, deletePlace, markLabeled, history, carrying],
   );
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

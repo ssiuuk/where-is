@@ -102,7 +102,20 @@ The app and the web version show **Continue with Google** as soon as the server 
 
 Anyone who can reach the server can create an account, but an account sees nothing until it joins a household with that household's invite code. A wrong code is rate-limited.
 
-To stop new accounts once your family has signed up, set `ALLOW_SIGNUP=false` in `.env` and run `docker compose up -d`. Sign-up then disappears from the app, and both email sign-up and a first-time Google sign-in are refused. Everyone who already has an account still signs in as before. To add someone later, create their account in the dashboard under Collections → users (or turn sign-up back on for a moment).
+To stop new accounts once your family has signed up, a site admin turns off **Allow sign-up** in **Settings → Admin → Server settings** (or set `ALLOW_SIGNUP=false` in `.env`, which then overrides the switch). Sign-up then disappears from the app, and both email sign-up and a first-time Google sign-in are refused. Everyone who already has an account still signs in as before. To add someone later, create their account in the dashboard under Collections → users (or turn sign-up back on for a moment).
+
+### Admins
+
+There are two admin roles, and the server checks them on every request. Each sees **Settings → Admin**; nobody else does.
+
+- **Family admin:** whoever created the household. They can hand the role to another member (it also passes on automatically if they leave or their account is turned off). Their tools cover that household only: members and invite codes (new code, invites on or off, remove someone, send a password reset email), CSV export and import, merging duplicate items or places, the recycle bin (deleted items and places are kept for 30 days and come back with the same labels), printing a full list of where everything is organised by place, printing many QR labels at once and seeing which places have none, the activity log, and stats.
+- **Site admin:** anyone who signs in with an email listed in `ADMIN_EMAILS` in `.env` (comma separated). The email must be confirmed, by signing in with Google or with the link the admin screen can email, so nobody can claim the role by signing up with your address first. Their tools cover the whole server: every account (turn off, delete, set a new password, send a reset email), the sign-up switch, email settings with a test email, Google sign-in with a check against Google, and backups (make, download, upload, restore, and a daily or weekly schedule).
+
+```sh
+ADMIN_EMAILS=you@example.com
+```
+
+Settings in `.env` win over the admin screens: when `ALLOW_SIGNUP`, `SMTP_HOST` or the Google keys are set there, the matching screen shows them but can't change them.
 
 ### Passwords
 
@@ -126,7 +139,7 @@ Every household's places, items and history are only visible to its members. A p
 
 ## Labels
 
-- **QR:** open a place (or item) → **Label** → **Save or share label image**, then print it. Plain paper and tape work; laminated or vinyl labels last longer in a garage or loft.
+- **QR:** open a place (or item) → **Label** → **Save or share label image**, then print it. The family admin can print a whole sheet at once under **Settings → Admin → Labels**, which also lists the places that have no label or sticker yet. Plain paper and tape work; laminated or vinyl labels last longer in a garage or loft.
 - **NFC:** buy blank NTAG213/215/216 stickers (about £0.20–0.40 each), open **Label** → **Write NFC sticker**, and hold the phone against the sticker. On metal shelves, use stickers made for metal ("anti-metal").
 - A label holds a link like `https://whereis.example.com/p/<id>`. It shows nothing to anyone outside your household. The app only accepts labels from the server it is signed in to (plus `whereis://` links on NFC stickers).
 
