@@ -34,7 +34,13 @@ function target(kind: string, id: string): TagTarget | null {
   return ID.test(id) ? { kind: kind as 'p' | 'i', id } : null;
 }
 
+/**
+ * What a label or sticker holds. With no server (this phone only) it's the
+ * app's own link, which keeps working after the phone moves to a server,
+ * since the upload keeps the same ids.
+ */
 export function tagUrl(serverUrl: string, kind: 'p' | 'i', id: string): string {
+  if (!serverUrl) return `whereis://${kind}/${id}`;
   return `${serverUrl.replace(/\/+$/, '')}/${kind}/${id}`;
 }
 

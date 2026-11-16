@@ -29,7 +29,8 @@ export default function Welcome() {
 }
 
 function ChooseServer() {
-  const { connectServer } = useSession();
+  const c = useColors();
+  const { connectServer, startPhoneOnly } = useSession();
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -60,6 +61,15 @@ function ChooseServer() {
       />
       <ErrorText>{error}</ErrorText>
       <Button title="Continue" onPress={go} busy={busy} disabled={!url.trim()} />
+      {Platform.OS !== 'web' ? (
+        <View style={{ gap: space.sm, marginTop: space.lg }}>
+          <Text style={{ color: c.muted, textAlign: 'center' }}>No server?</Text>
+          <Button kind="secondary" icon="cellphone" title="Use on this phone only" onPress={() => startPhoneOnly().catch((e) => setError(errorMessage(e)))} />
+          <Body muted>
+            Everything stays on this phone, with no account. Family sharing needs a server; you can move everything to one later.
+          </Body>
+        </View>
+      ) : null}
     </View>
   );
 }

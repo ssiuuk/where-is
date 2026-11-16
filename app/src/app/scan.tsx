@@ -19,7 +19,7 @@ import { cancelNfc, nfcEnabled, nfcSupported, openNfcSettings, readTag } from '@
 export default function Scan() {
   const c = useColors();
   const data = useData();
-  const { pb } = useMember();
+  const { serverUrl, phoneOnly } = useMember();
   const [perm, requestPerm] = useCameraPermissions();
   const [focused, setFocused] = useState(true);
   const [message, setMessage] = useState('');
@@ -46,7 +46,7 @@ export default function Scan() {
     async (target: TagTarget | null) => {
       setError('');
       if (!target) {
-        setError("That isn't a label from your Where Is server.");
+        setError(phoneOnly ? "That isn't a Where Is label made on this phone." : "That isn't a label from your Where Is server.");
         return;
       }
       if (target.kind === 'i') {
@@ -76,14 +76,14 @@ export default function Scan() {
       }
       router.replace(`/p/${place.id}`);
     },
-    [data, carrying],
+    [data, carrying, phoneOnly],
   );
 
   const onCode = async (text: string) => {
     if (handling.current) return;
     handling.current = true;
     try {
-      await handle(parseTagUrl(text, pb.baseURL));
+      await handle(parseTagUrl(text, serverUrl));
     } finally {
       // ignore the same code for a moment so one scan isn't read twice
       setTimeout(() => (handling.current = false), 1500);
@@ -95,7 +95,7 @@ export default function Scan() {
     setError('');
     try {
       const url = await readTag();
-      await handle(url ? parseTagUrl(url, pb.baseURL) : null);
+      await handle(url ? parseTagUrl(url, serverUrl) : null);
     } catch (e) {
       const msg = (e as Error)?.message ?? '';
       if (!/cancel/i.test(msg)) setError(msg ? errorMessage(e) : "Couldn't read the sticker. Hold the phone still and try again.");
