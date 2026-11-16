@@ -63,3 +63,14 @@ test('copes with items saved before tags existed', () => {
   const old = { ...item('Passport'), tags: undefined, aliases: undefined } as unknown as Item;
   assert.deepEqual(searchItems([old], 'pass', () => '').length, 1);
 });
+
+test('any name match ranks above any alias match, then tags, then notes and places', () => {
+  const list = [
+    item('Note', 'van keys inside'),
+    item('Wrench', '', '', '', ['van']),
+    item('Spare key', '', '', '', [], ['van key']),
+    item('Caravan cover'),
+  ];
+  // "van" is only inside the name "Caravan", but at the start of the other's alias and tag
+  assert.deepEqual(searchItems(list, 'van', where).map((i) => i.name), ['Caravan cover', 'Spare key', 'Wrench', 'Note']);
+});

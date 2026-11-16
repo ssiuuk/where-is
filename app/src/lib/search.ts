@@ -10,10 +10,18 @@ export function normalize(s: string): string {
 
 export type SearchHit = { item: Item; score: number };
 
-function nameScore(name: string, w: string, start: number): number {
-  if (name.startsWith(w)) return start;
-  if (name.split(/\s+/).some((part) => part.startsWith(w))) return 3;
-  if (name.includes(w)) return 2;
+// Each kind of match scores in its own band, so any name match beats any
+// alias match, which beats any tag match, which beats a note or place match.
+const NAME = 10;
+const ALIAS = 6;
+const TAG = 3;
+const OTHER = 1;
+
+/** 0 for no match; otherwise band + 2 at the start, + 1 at a word start, + 0 inside. */
+function nameScore(name: string, w: string, band: number): number {
+  if (name.startsWith(w)) return band + 2;
+  if (name.split(/\s+/).some((part) => part.startsWith(w))) return band + 1;
+  if (name.includes(w)) return band;
   return 0;
 }
 
@@ -40,12 +48,12 @@ export function searchItems(items: Item[], query: string, placeText: (item: Item
       let s = 0;
       if (word.startsWith('#')) {
         const t = word.replace(/^#+/, '');
-        s = !t ? 1 : tags.includes(t) ? 2 : tags.some((x) => x.startsWith(t)) ? 1 : 0;
+        s = !t ? OTHER : tags.includes(t) ? TAG + 2 : tags.some((x) => x.startsWith(t)) ? TAG + 1 : 0;
       } else {
-        s = nameScore(name, word, 4);
-        for (const a of aliases) s = Math.max(s, nameScore(a, word, 3));
-        if (!s && tags.some((x) => x.startsWith(word))) s = 2;
-        if (!s && (tags.some((x) => x.includes(word)) || rest.includes(word))) s = 1;
+        s = nameScore(name, word, NAME);
+        if (!s) s = Math.max(0, ...aliases.map((a) => nameScore(a, word, ALIAS)));
+        if (!s) s = Math.max(0, ...tags.map((x) => nameScore(x, word, TAG)));
+        if (!s && rest.includes(word)) s = OTHER;
       }
       if (!s) {
         ok = false;
