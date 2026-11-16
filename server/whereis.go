@@ -84,6 +84,14 @@ func ConfigFromEnv(getenv func(string) string) Config {
 	default:
 		c.Mail.TLS = c.Mail.Port == 465
 	}
+	switch strings.ToLower(strings.TrimSpace(getenv("SMTP_STARTTLS"))) {
+	case "false", "0", "no", "off":
+		c.Mail.NoStartTLS = true
+	}
+	switch strings.ToLower(strings.TrimSpace(getenv("SMTP_TLS_VERIFY"))) {
+	case "false", "0", "no", "off":
+		c.Mail.SkipVerify = true
+	}
 	if c.Mail.FromName == "" {
 		c.Mail.FromName = "Where Is"
 	}
@@ -117,18 +125,24 @@ func ConfigFromEnv(getenv func(string) string) Config {
 // MailConfig comes from SMTP_* and MAIL_FROM_* in .env. When Host is empty
 // the server leaves whatever was set in the dashboard alone.
 type MailConfig struct {
-	Host        string
-	Port        int
-	Username    string
-	Password    string
-	TLS         bool // implicit TLS (usually port 465); otherwise STARTTLS is used when offered
+	Host     string
+	Port     int
+	Username string
+	Password string
+	TLS      bool // implicit TLS (usually port 465); otherwise STARTTLS is used when offered
+	// NoStartTLS (SMTP_STARTTLS=false) sends in plain text even when the
+	// server offers STARTTLS: for a mail server on the home network.
+	NoStartTLS bool
+	// SkipVerify (SMTP_TLS_VERIFY=false) accepts any certificate from the
+	// mail server, such as an internal server's self-signed one.
+	SkipVerify  bool
 	FromAddress string
 	FromName    string
 }
 
 // Register wires the Where Is routes and hooks into a PocketBase app.
 func Register(app core.App, cfg Config) {
-	logMail(app)
+	logMail(app, cfg)
 
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		if err := applyGoogleConfig(se.App, cfg); err != nil {
