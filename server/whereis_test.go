@@ -27,12 +27,16 @@ type fixture struct {
 }
 
 func newFixture(t testing.TB) *fixture {
+	return newFixtureWith(t, Config{AndroidPackage: "com.ssiuuk.whereis", AppDownloadURL: "https://example.com/app"})
+}
+
+func newFixtureWith(t testing.TB, cfg Config) *fixture {
 	t.Helper()
 	app, err := tests.NewTestApp(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	Register(app, Config{AndroidPackage: "com.ssiuuk.whereis", AppDownloadURL: "https://example.com/app"})
+	Register(app, cfg)
 
 	f := &fixture{app: app}
 	f.h1 = f.save(t, "households", map[string]any{"name": "Home", "invite_code": "ABCD-2345"})
