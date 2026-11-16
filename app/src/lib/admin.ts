@@ -153,7 +153,12 @@ export function printLabels(labels: LabelInput[], size: 'small' | 'large'): Prom
   return printHtml(labelSheetHtml(labels, size));
 }
 
-/** Opens the print dialog for a page of HTML; it can also save a PDF. */
+/**
+ * Opens the print dialog for a page of HTML; it can also save a PDF. It
+ * resolves once the dialog has closed. Neither browsers nor phones say
+ * whether anything was actually printed, so callers that record printing
+ * should ask.
+ */
 export async function printHtml(html: string): Promise<void> {
   if (Platform.OS === 'web') {
     const w = window.open('', '_blank');
@@ -162,8 +167,26 @@ export async function printHtml(html: string): Promise<void> {
     w.document.write(html);
     w.document.close();
     w.focus();
-    // let the SVGs lay out before the print dialog takes a snapshot
-    setTimeout(() => w.print(), 300);
+    await new Promise<void>((resolve) => {
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        clearInterval(closed);
+        resolve();
+      };
+      // the dialog closed (printed or cancelled), or the window was shut
+      w.addEventListener('afterprint', finish);
+      const closed = setInterval(() => w.closed && finish(), 500);
+      // let the SVGs lay out before the print dialog takes a snapshot
+      setTimeout(() => {
+        try {
+          w.print();
+        } catch {
+          finish();
+        }
+      }, 300);
+    });
     return;
   }
   await Print.printAsync({ html });

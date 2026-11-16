@@ -21,6 +21,8 @@ export default function BulkLabels() {
   const [filter, setFilter] = useState<Filter>('unlabeled');
   const [size, setSize] = useState<'small' | 'large'>('small');
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  // places just sent to print, waiting for "did they print?"
+  const [printed, setPrinted] = useState<string[] | null>(null);
 
   const rows = useMemo(() => placeTree(data.places), [data.places]);
   const isLabeled = (id: string) => {
@@ -47,11 +49,16 @@ export default function BulkLabels() {
         size,
       ),
     );
-    if (ok) {
-      await data.markLabeled(ids, 'label');
-      a.setDone(`Sent ${ids.length} label${ids.length === 1 ? '' : 's'} to print. They're now marked as labeled.`);
-      setPicked(new Set());
-    }
+    // the print dialog doesn't say whether anything came out, so ask
+    if (ok) setPrinted(ids);
+  };
+
+  const confirmPrinted = async (yes: boolean) => {
+    const ids = printed ?? [];
+    setPrinted(null);
+    if (!yes) return;
+    await a.run('mark', () => data.markLabeled(ids, 'label'), `${ids.length} place${ids.length === 1 ? '' : 's'} marked as labelled.`);
+    setPicked(new Set());
   };
 
   return (
@@ -82,6 +89,15 @@ export default function BulkLabels() {
           />
           <ErrorText>{a.error}</ErrorText>
           {a.done ? <Notice icon="check-circle-outline">{a.done}</Notice> : null}
+          {printed ? (
+            <View style={{ gap: space.sm }}>
+              <Notice icon="printer-check">{`Did the ${printed.length} label${printed.length === 1 ? '' : 's'} print? Only then are the places marked as labelled.`}</Notice>
+              <View style={{ flexDirection: 'row', gap: space.sm }}>
+                <Button style={{ flex: 1 }} title="Yes, mark them" busy={a.busy === 'mark'} onPress={() => confirmPrinted(true)} />
+                <Button style={{ flex: 1 }} kind="secondary" title="No" onPress={() => confirmPrinted(false)} />
+              </View>
+            </View>
+          ) : null}
           <View style={{ flexDirection: 'row', gap: space.sm }}>
             <Button
               kind="secondary"
@@ -90,7 +106,7 @@ export default function BulkLabels() {
               onPress={() => setPicked(allShownPicked ? new Set() : new Set(shown.map((r) => r.place.id)))}
               disabled={!shown.length}
             />
-            <Button style={{ flex: 1 }} icon="printer-outline" title={`Print ${picked.size || ''}`.trim()} disabled={!picked.size} busy={a.busy === 'print'} onPress={print} />
+            <Button style={{ flex: 1 }} icon="printer-outline" title={`Print ${picked.size || ''}`.trim()} disabled={!picked.size || !!printed} busy={a.busy === 'print'} onPress={print} />
           </View>
         </View>
       }
