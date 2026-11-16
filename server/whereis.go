@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/pocketbase/dbx"
@@ -25,6 +26,11 @@ type Config struct {
 	// /.well-known/assetlinks.json so tag links open the app directly.
 	AndroidPackage    string
 	AndroidCertSHA256 []string
+	// PublicURL is the address people use to reach the server, such as
+	// https://whereis.example.com. Links in emails (password reset) use it.
+	PublicURL string
+	// Mail is the email server used for password reset emails.
+	Mail MailConfig
 	// SignupClosed stops new accounts (email sign-up and first-time Google
 	// sign-in). Existing accounts still sign in, and a superuser can still
 	// create accounts in the dashboard. Set with ALLOW_SIGNUP=false.
@@ -45,6 +51,33 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		AndroidPackage:     strings.TrimSpace(getenv("ANDROID_PACKAGE")),
 	}
 	c.WebDir = strings.TrimSpace(getenv("WEB_DIR"))
+	c.PublicURL = strings.TrimRight(strings.TrimSpace(getenv("PUBLIC_URL")), "/")
+	if c.PublicURL == "" {
+		if d := strings.TrimSpace(getenv("WHEREIS_DOMAIN")); d != "" {
+			c.PublicURL = "https://" + d
+		}
+	}
+	c.Mail = MailConfig{
+		Host:        strings.TrimSpace(getenv("SMTP_HOST")),
+		Username:    strings.TrimSpace(getenv("SMTP_USERNAME")),
+		Password:    getenv("SMTP_PASSWORD"),
+		FromAddress: strings.TrimSpace(getenv("MAIL_FROM_ADDRESS")),
+		FromName:    strings.TrimSpace(getenv("MAIL_FROM_NAME")),
+	}
+	c.Mail.Port, _ = strconv.Atoi(strings.TrimSpace(getenv("SMTP_PORT")))
+	if c.Mail.Port == 0 {
+		c.Mail.Port = 587
+	}
+	switch strings.ToLower(strings.TrimSpace(getenv("SMTP_TLS"))) {
+	case "true", "1", "yes", "on":
+		c.Mail.TLS = true
+	case "false", "0", "no", "off":
+	default:
+		c.Mail.TLS = c.Mail.Port == 465
+	}
+	if c.Mail.FromName == "" {
+		c.Mail.FromName = "Where Is"
+	}
 	switch strings.ToLower(strings.TrimSpace(getenv("ALLOW_SIGNUP"))) {
 	case "false", "0", "no", "off":
 		c.SignupClosed = true
@@ -64,10 +97,25 @@ func ConfigFromEnv(getenv func(string) string) Config {
 	return c
 }
 
+// MailConfig comes from SMTP_* and MAIL_FROM_* in .env. When Host is empty
+// the server leaves whatever was set in the dashboard alone.
+type MailConfig struct {
+	Host        string
+	Port        int
+	Username    string
+	Password    string
+	TLS         bool // implicit TLS (usually port 465); otherwise STARTTLS is used when offered
+	FromAddress string
+	FromName    string
+}
+
 // Register wires the Where Is routes and hooks into a PocketBase app.
 func Register(app core.App, cfg Config) {
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		if err := applyGoogleConfig(se.App, cfg); err != nil {
+			return err
+		}
+		if err := applyMailConfig(se.App, cfg); err != nil {
 			return err
 		}
 
@@ -465,6 +513,35 @@ func moveItems(e *core.RequestEvent) error {
 
 // ---------------------------------------------------------------------
 // Google sign-in
+
+// applyMailConfig copies the .env email and address settings into
+// PocketBase's settings, so password reset emails work without the dashboard.
+func applyMailConfig(app core.App, cfg Config) error {
+	if cfg.PublicURL == "" && cfg.Mail.Host == "" {
+		return nil
+	}
+	settings := app.Settings()
+	if cfg.PublicURL != "" {
+		settings.Meta.AppURL = cfg.PublicURL
+	}
+	if m := cfg.Mail; m.Host != "" {
+		if m.FromAddress == "" {
+			return errors.New("SMTP_HOST is set but MAIL_FROM_ADDRESS is empty: set the address password reset emails come from")
+		}
+		settings.SMTP.Enabled = true
+		settings.SMTP.Host = m.Host
+		settings.SMTP.Port = m.Port
+		settings.SMTP.Username = m.Username
+		settings.SMTP.Password = m.Password
+		settings.SMTP.TLS = m.TLS
+		settings.Meta.SenderAddress = m.FromAddress
+		settings.Meta.SenderName = m.FromName
+	}
+	if err := app.Save(settings); err != nil {
+		return errors.Join(errors.New("couldn't save the email settings"), err)
+	}
+	return nil
+}
 
 func applyGoogleConfig(app core.App, cfg Config) error {
 	users, err := app.FindCollectionByNameOrId("users")

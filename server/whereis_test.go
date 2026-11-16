@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
@@ -685,5 +686,52 @@ func TestSignupSwitch(t *testing.T) {
 		Name: "closed: superuser can still create accounts", Method: http.MethodPost, URL: "/api/collections/users/records",
 		Headers: map[string]string{"Authorization": token(t, su)},
 		Body:    strings.NewReader(signup), ExpectedStatus: 200,
+	})
+}
+
+func TestMailFromEnv(t *testing.T) {
+	env := map[string]string{
+		"PUBLIC_URL": "https://whereis.example.com/", "SMTP_HOST": "smtp.example.com", "SMTP_PORT": "465",
+		"SMTP_USERNAME": "me", "SMTP_PASSWORD": "pw", "MAIL_FROM_ADDRESS": "whereis@example.com",
+	}
+	cfg := ConfigFromEnv(func(k string) string { return env[k] })
+	if cfg.PublicURL != "https://whereis.example.com" || !cfg.Mail.TLS || cfg.Mail.FromName != "Where Is" {
+		t.Fatalf("unexpected config %+v", cfg)
+	}
+	if c := ConfigFromEnv(func(k string) string { return map[string]string{"WHEREIS_DOMAIN": "w.example.com"}[k] }); c.PublicURL != "https://w.example.com" || c.Mail.Port != 587 || c.Mail.TLS {
+		t.Fatalf("defaults: %+v", c)
+	}
+
+	f := newFixture(t)
+	defer f.app.Cleanup()
+	if err := applyMailConfig(f.app, Config{Mail: MailConfig{Host: "smtp.example.com"}}); err == nil {
+		t.Fatal("a mail server without a from address should be refused")
+	}
+	if err := applyMailConfig(f.app, cfg); err != nil {
+		t.Fatal(err)
+	}
+	st := f.app.Settings()
+	if !st.SMTP.Enabled || st.SMTP.Host != "smtp.example.com" || st.SMTP.Port != 465 || st.Meta.SenderAddress != "whereis@example.com" || st.Meta.AppURL != "https://whereis.example.com" {
+		t.Fatalf("settings not applied: %+v %+v", st.SMTP, st.Meta)
+	}
+
+	run(t, f, tests.ApiScenario{
+		Name: "reset email", Method: http.MethodPost,
+		URL:            "/api/collections/users/request-password-reset",
+		Body:           strings.NewReader(`{"email":"ann@example.com"}`),
+		ExpectedStatus: 204,
+		AfterTestFunc: func(t testing.TB, app *tests.TestApp, res *http.Response) {
+			// the email is sent in the background after the response
+			for i := 0; i < 50 && app.TestMailer.TotalSend() == 0; i++ {
+				time.Sleep(20 * time.Millisecond)
+			}
+			if app.TestMailer.TotalSend() != 1 {
+				t.Fatalf("sent %d emails", app.TestMailer.TotalSend())
+			}
+			m := app.TestMailer.LastMessage()
+			if m.From.Address != "whereis@example.com" || !strings.Contains(m.HTML, "https://whereis.example.com/") {
+				t.Fatalf("from %v, body %s", m.From, m.HTML)
+			}
+		},
 	})
 }
