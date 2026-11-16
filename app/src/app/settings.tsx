@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { ScrollView, Share, Text, View } from 'react-native';
 
@@ -81,6 +82,7 @@ export default function Settings() {
 
       <Card>
         <Heading>{`Members (${members.length})`}</Heading>
+        {s.household.owner ? <Body muted>{`Family admin: ${s.household.owner === s.user.id ? 'you' : members.find((m) => m.id === s.household.owner)?.name || members.find((m) => m.id === s.household.owner)?.email || 'someone'}`}</Body> : null}
         {members.map((m) => (
           <View key={m.id}>
             <Text style={{ color: c.text, fontSize: font.body }}>
@@ -89,6 +91,18 @@ export default function Settings() {
           </View>
         ))}
       </Card>
+
+      {s.roles.family || s.roles.site || s.roles.siteNeedsVerify ? (
+        <Card>
+          <Heading>Admin</Heading>
+          <Body muted>
+            {[s.roles.family ? 'You are the family admin of this household.' : '', s.roles.site ? 'You are a site admin of this server.' : '']
+              .filter(Boolean)
+              .join(' ') || 'Your email is listed as a site admin; confirm it to get the server tools.'}
+          </Body>
+          <Button kind="secondary" icon="shield-account-outline" title="Open admin tools" onPress={() => router.push('/admin')} />
+        </Card>
+      ) : null}
 
       <Card>
         <Heading>You</Heading>

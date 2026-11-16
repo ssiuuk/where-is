@@ -3,6 +3,7 @@ import PocketBase from 'pocketbase';
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
 
+import { adminApi, noRoles, Roles } from './admin';
 import { createClient, savedServer, saveServer } from './client';
 import { normalizeServerUrl } from './links';
 import type { Household } from './types';
@@ -15,6 +16,9 @@ type Session = {
   pb: PocketBase | null;
   user: SessionUser | null;
   household: Household | null;
+  /** Family admin (owns the household) and site admin (email in ADMIN_EMAILS). */
+  roles: Roles;
+  refreshRoles(): Promise<void>;
   connectServer(input: string): Promise<void>;
   forgetServer(): Promise<void>;
   signIn(email: string, password: string): Promise<void>;
@@ -76,6 +80,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [pb, setPb] = useState<PocketBase | null>(null);
   const [user, setUser] = useState<SessionUser | null>(null);
   const [household, setHousehold] = useState<Household | null>(null);
+  const [roles, setRoles] = useState<Roles>(noRoles);
+
+  const loadRoles = useCallback(async (client: PocketBase) => {
+    if (!client.authStore.isValid) {
+      setRoles(noRoles);
+      return;
+    }
+    try {
+      setRoles(await adminApi(client).roles());
+    } catch {
+      // offline or an older server: no admin screens
+      setRoles(noRoles);
+    }
+  }, []);
 
   const loadHousehold = useCallback(async (client: PocketBase, u: SessionUser | null) => {
     if (!u?.household) {
@@ -97,9 +115,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     async (client: PocketBase) => {
       const u = toUser(client.authStore.record as Record<string, unknown> | null);
       setUser(u);
-      await loadHousehold(client, u);
+      await Promise.all([loadHousehold(client, u), u ? loadRoles(client) : Promise.resolve(setRoles(noRoles))]);
     },
-    [loadHousehold],
+    [loadHousehold, loadRoles],
   );
 
   // start up: reopen the last server and sign-in
@@ -225,7 +243,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     pb?.authStore.clear();
     setUser(null);
     setHousehold(null);
+    setRoles(noRoles);
   }, [pb]);
+
+  const refreshRoles = useCallback(async () => {
+    if (pb) await loadRoles(pb);
+  }, [pb, loadRoles]);
 
   const refresh = useCallback(async () => {
     const client = need();
@@ -290,12 +313,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<Session>(
     () => ({
-      ready, serverUrl, pb, user, household,
+      ready, serverUrl, pb, user, household, roles, refreshRoles,
       connectServer, forgetServer, signIn, signUp, signInWithGoogle, googleAvailable, signupOpen, signOut,
       createHousehold, joinHousehold, leaveHousehold, newInviteCode, renameHousehold, refresh,
       changePassword, requestPasswordReset,
     }),
-    [ready, serverUrl, pb, user, household, connectServer, forgetServer, signIn, signUp, signInWithGoogle,
+    [ready, serverUrl, pb, user, household, roles, refreshRoles, connectServer, forgetServer, signIn, signUp, signInWithGoogle,
       googleAvailable, signupOpen, signOut, createHousehold, joinHousehold, leaveHousehold, newInviteCode, renameHousehold, refresh,
       changePassword, requestPasswordReset],
   );

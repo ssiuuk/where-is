@@ -93,10 +93,9 @@ func normName(s string) string {
 }
 
 type importResult struct {
-	Items   int      `json:"items"`
-	Places  int      `json:"places"`
-	Skipped int      `json:"skipped"`
-	Notes   []string `json:"notes"`
+	Items   int `json:"items"`
+	Places  int `json:"places"`
+	Skipped int `json:"skipped"`
 }
 
 var errDryRun = errors.New("dry run")
