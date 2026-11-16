@@ -5,6 +5,9 @@ import { Platform } from 'react-native';
 
 import { createClient, savedServer, saveServer } from './client';
 import { normalizeServerUrl } from './links';
+import { changePasswordAndSignIn, PasswordChangedError } from './password';
+
+export { PasswordChangedError };
 import type { Household } from './types';
 
 export type SessionUser = { id: string; name: string; email: string; household: string; collectionId: string; avatar: string };
@@ -21,6 +24,7 @@ type Session = {
   signUp(name: string, email: string, password: string): Promise<void>;
   signInWithGoogle(): Promise<void>;
   googleAvailable(): Promise<boolean>;
+  signupOpen(): Promise<boolean>;
   signOut(): void;
   createHousehold(name: string): Promise<void>;
   joinHousehold(code: string): Promise<void>;
@@ -28,6 +32,10 @@ type Session = {
   newInviteCode(): Promise<void>;
   renameHousehold(name: string): Promise<void>;
   refresh(): Promise<void>;
+  changePassword(current: string, next: string): Promise<void>;
+  /** A message for the sign-in screen, e.g. after a password change signed this device out. */
+  notice: string;
+  requestPasswordReset(email: string): Promise<void>;
 };
 
 const SessionContext = createContext<Session | null>(null);
@@ -73,6 +81,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [pb, setPb] = useState<PocketBase | null>(null);
   const [user, setUser] = useState<SessionUser | null>(null);
   const [household, setHousehold] = useState<Household | null>(null);
+  const [notice, setNotice] = useState('');
 
   const loadHousehold = useCallback(async (client: PocketBase, u: SessionUser | null) => {
     if (!u?.household) {
@@ -93,6 +102,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const adopt = useCallback(
     async (client: PocketBase) => {
       const u = toUser(client.authStore.record as Record<string, unknown> | null);
+      if (u) setNotice('');
       setUser(u);
       await loadHousehold(client, u);
     },
@@ -187,6 +197,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, [pb]);
 
+  const signupOpen = useCallback(async () => {
+    if (!pb) return false;
+    try {
+      const c = await pb.send<{ signup: boolean }>('/api/whereis/config', {});
+      return c.signup !== false;
+    } catch {
+      return true; // an older server: let it decide
+    }
+  }, [pb]);
+
   const signInWithGoogle = useCallback(async () => {
     const client = need();
     try {
@@ -219,6 +239,41 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     await client.collection('users').authRefresh();
     await adopt(client);
   }, [need, adopt]);
+
+  const changePassword = useCallback(
+    async (current: string, next: string) => {
+      const client = need();
+      const me = client.authStore.record;
+      if (!me) throw new Error('Sign in first.');
+      try {
+        await changePasswordAndSignIn({
+          update: async () => {
+            await client.collection('users').update(me.id, { oldPassword: current, password: next, passwordConfirm: next });
+          },
+          signIn: async () => {
+            await client.collection('users').authWithPassword(me.email, next);
+            await adopt(client);
+          },
+          signOut: () => {
+            client.authStore.clear();
+            setUser(null);
+            setHousehold(null);
+          },
+        });
+      } catch (e) {
+        if (e instanceof PasswordChangedError) setNotice(e.message);
+        throw e;
+      }
+    },
+    [need, adopt],
+  );
+
+  const requestPasswordReset = useCallback(
+    async (email: string) => {
+      await need().collection('users').requestPasswordReset(email.trim());
+    },
+    [need],
+  );
 
   const createHousehold = useCallback(
     async (name: string) => {
@@ -258,11 +313,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const value = useMemo<Session>(
     () => ({
       ready, serverUrl, pb, user, household,
-      connectServer, forgetServer, signIn, signUp, signInWithGoogle, googleAvailable, signOut,
+      connectServer, forgetServer, signIn, signUp, signInWithGoogle, googleAvailable, signupOpen, signOut,
       createHousehold, joinHousehold, leaveHousehold, newInviteCode, renameHousehold, refresh,
+      changePassword, requestPasswordReset, notice,
     }),
     [ready, serverUrl, pb, user, household, connectServer, forgetServer, signIn, signUp, signInWithGoogle,
-      googleAvailable, signOut, createHousehold, joinHousehold, leaveHousehold, newInviteCode, renameHousehold, refresh],
+      googleAvailable, signupOpen, signOut, createHousehold, joinHousehold, leaveHousehold, newInviteCode, renameHousehold, refresh,
+      changePassword, requestPasswordReset, notice],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

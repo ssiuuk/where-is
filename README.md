@@ -99,7 +99,27 @@ The app and the web version show **Continue with Google** as soon as the server 
 
 ### Who can get in
 
-Anyone who can reach the server can create an account, but an account sees nothing until it joins a household with that household's invite code. A wrong code is rate-limited. To stop new accounts entirely, open the dashboard, go to Collections → users → API Rules and set the **Create** rule to superusers only. Then create each person's account in the dashboard.
+Anyone who can reach the server can create an account, but an account sees nothing until it joins a household with that household's invite code. A wrong code is rate-limited.
+
+To stop new accounts once your family has signed up, set `ALLOW_SIGNUP=false` in `.env` and run `docker compose up -d`. Sign-up then disappears from the app, and both email sign-up and a first-time Google sign-in are refused. Everyone who already has an account still signs in as before. To add someone later, create their account in the dashboard under Collections → users (or turn sign-up back on for a moment).
+
+### Passwords
+
+People change their password under **Settings → You → Change password**. Doing so signs them out on their other devices.
+
+**Forgot password?** on the sign-in screen emails a reset link, so it only works once the server can send email. Put your email server in `.env` and run `docker compose up -d`:
+
+```sh
+PUBLIC_URL=https://whereis.example.com   # used for the link in the email
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587                            # 465 for TLS from the start
+SMTP_USERNAME=you@example.com
+SMTP_PASSWORD=app-password
+MAIL_FROM_ADDRESS=whereis@example.com    # the address emails come from
+MAIL_FROM_NAME=Where Is
+```
+
+Any SMTP server works: your email provider's (for Gmail, use an app password), or a service such as Brevo or Mailgun. The settings in `.env` are applied each time the server starts. Leave `SMTP_HOST` empty to manage them in the dashboard under Settings → Mail settings instead; the dashboard can also send a test email. The link in the email opens a page on your server where the person picks a new password. Until email is set up, a superuser can set anyone's password in the dashboard: Collections → users → open the person → type a new password → Save. People who signed up with Google have no password; they can keep using Google, or set one with **Forgot password?**.
 
 Every household's places, items and history are only visible to its members. A person belongs to one household at a time: to switch, they leave in Settings first. Item photos are protected files: they are only served with a short-lived file token that the server gives to signed-in members of that household, so a copied photo link stops working within the hour. Who moved an item and when is always set by the server, and an item's move and its history entry are saved together or not at all. This is enforced by the server's API rules (see `server/migrations`) and covered by the tests in `server/whereis_test.go`.
 

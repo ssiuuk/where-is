@@ -73,10 +73,17 @@ function SignIn() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState<'' | 'password' | 'google'>('');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [google, setGoogle] = useState(false);
+  // null until the server says whether sign-up is open
+  const [signup, setSignup] = useState<boolean | null>(null);
 
   useEffect(() => {
     s.googleAvailable().then(setGoogle);
+    s.signupOpen().then((open) => {
+      setSignup(open);
+      if (!open) setMode('in');
+    });
   }, [s]);
 
   const submit = async () => {
@@ -134,20 +141,45 @@ function SignIn() {
         onSubmitEditing={submit}
       />
       <ErrorText>{error}</ErrorText>
+      {notice || s.notice ? <Text style={{ color: c.muted }}>{notice || s.notice}</Text> : null}
       <Button
         title={mode === 'in' ? 'Sign in' : 'Create account'}
         onPress={submit}
         busy={busy === 'password'}
         disabled={!!busy || !email.trim() || !password || (mode === 'up' && !name.trim())}
       />
-      <Button
-        kind="plain"
-        title={mode === 'in' ? 'New here? Create an account' : 'Already have an account? Sign in'}
-        onPress={() => {
-          setMode(mode === 'in' ? 'up' : 'in');
-          setError('');
-        }}
-      />
+      {signup === null ? null : signup ? (
+        <Button
+          kind="plain"
+          title={mode === 'in' ? 'New here? Create an account' : 'Already have an account? Sign in'}
+          onPress={() => {
+            setMode(mode === 'in' ? 'up' : 'in');
+            setError('');
+          }}
+        />
+      ) : (
+        <Text style={{ color: c.muted, textAlign: 'center' }}>New accounts are turned off on this server. Ask whoever runs it to add you.</Text>
+      )}
+      {mode === 'in' ? (
+        <Button
+          kind="plain"
+          title="Forgot password?"
+          onPress={async () => {
+            setError('');
+            setNotice('');
+            if (!email.trim()) {
+              setError('Type your email above first.');
+              return;
+            }
+            try {
+              await s.requestPasswordReset(email);
+              setNotice(`If ${email.trim()} has an account, a link to set a new password is on its way. If nothing arrives, ask whoever runs the server.`);
+            } catch (e) {
+              setError(errorMessage(e));
+            }
+          }}
+        />
+      ) : null}
       {Platform.OS !== 'web' ? <Button kind="plain" title="Use a different server" onPress={() => s.forgetServer()} /> : null}
     </View>
   );

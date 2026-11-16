@@ -2,6 +2,9 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"github.com/pocketbase/pocketbase/tools/auth"
+	"golang.org/x/oauth2"
 
 	"github.com/pocketbase/dbx"
 	"net/http"
@@ -9,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
@@ -631,4 +635,172 @@ func TestPhotosArePrivate(t *testing.T) {
 		ExpectedStatus:  200,
 		ExpectedContent: []string{"PNG"},
 	})
+}
+
+func TestSignupSwitch(t *testing.T) {
+	if !ConfigFromEnv(func(k string) string { return map[string]string{"ALLOW_SIGNUP": "false"}[k] }).SignupClosed {
+		t.Fatal("ALLOW_SIGNUP=false should close sign-up")
+	}
+	if ConfigFromEnv(func(string) string { return "" }).SignupClosed {
+		t.Fatal("sign-up should be open by default")
+	}
+
+	signup := `{"email":"new@example.com","password":"password123","passwordConfirm":"password123"}`
+	open := newFixture(t)
+	defer open.app.Cleanup()
+	run(t, open, tests.ApiScenario{
+		Name: "open: config", Method: http.MethodGet, URL: "/api/whereis/config",
+		ExpectedStatus: 200, ExpectedContent: []string{`"signup":true`},
+	})
+	run(t, open, tests.ApiScenario{
+		Name: "open: sign up", Method: http.MethodPost, URL: "/api/collections/users/records",
+		Body: strings.NewReader(signup), ExpectedStatus: 200,
+	})
+
+	app, err := tests.NewTestApp(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Cleanup()
+	Register(app, Config{SignupClosed: true})
+	closed := &fixture{app: app}
+	closed.user(t, "ann@example.com", "")
+	run(t, closed, tests.ApiScenario{
+		Name: "closed: config", Method: http.MethodGet, URL: "/api/whereis/config",
+		ExpectedStatus: 200, ExpectedContent: []string{`"signup":false`},
+	})
+	run(t, closed, tests.ApiScenario{
+		Name: "closed: sign up refused", Method: http.MethodPost, URL: "/api/collections/users/records",
+		Body: strings.NewReader(signup), ExpectedStatus: 403, ExpectedContent: []string{"New accounts are turned off"},
+	})
+	run(t, closed, tests.ApiScenario{
+		Name: "closed: existing account still signs in", Method: http.MethodPost,
+		URL:  "/api/collections/users/auth-with-password",
+		Body: strings.NewReader(`{"identity":"ann@example.com","password":"password123"}`), ExpectedStatus: 200,
+	})
+	suCol, _ := app.FindCollectionByNameOrId(core.CollectionNameSuperusers)
+	su := core.NewRecord(suCol)
+	su.SetEmail("admin@example.com")
+	su.SetPassword("password123")
+	if err := app.Save(su); err != nil {
+		t.Fatal(err)
+	}
+	run(t, closed, tests.ApiScenario{
+		Name: "closed: superuser can still create accounts", Method: http.MethodPost, URL: "/api/collections/users/records",
+		Headers: map[string]string{"Authorization": token(t, su)},
+		Body:    strings.NewReader(signup), ExpectedStatus: 200,
+	})
+}
+
+func TestMailFromEnv(t *testing.T) {
+	env := map[string]string{
+		"PUBLIC_URL": "https://whereis.example.com/", "SMTP_HOST": "smtp.example.com", "SMTP_PORT": "465",
+		"SMTP_USERNAME": "me", "SMTP_PASSWORD": "pw", "MAIL_FROM_ADDRESS": "whereis@example.com",
+	}
+	cfg := ConfigFromEnv(func(k string) string { return env[k] })
+	if cfg.PublicURL != "https://whereis.example.com" || !cfg.Mail.TLS || cfg.Mail.FromName != "Where Is" {
+		t.Fatalf("unexpected config %+v", cfg)
+	}
+	if c := ConfigFromEnv(func(k string) string { return map[string]string{"WHEREIS_DOMAIN": "w.example.com"}[k] }); c.PublicURL != "https://w.example.com" || c.Mail.Port != 587 || c.Mail.TLS {
+		t.Fatalf("defaults: %+v", c)
+	}
+
+	f := newFixture(t)
+	defer f.app.Cleanup()
+	if err := applyMailConfig(f.app, Config{Mail: MailConfig{Host: "smtp.example.com"}}); err == nil {
+		t.Fatal("a mail server without a from address should be refused")
+	}
+	for _, port := range []string{"0", "-25", "70000", "smtp"} {
+		bad := ConfigFromEnv(func(k string) string {
+			if k == "SMTP_PORT" {
+				return port
+			}
+			return env[k]
+		})
+		if err := applyMailConfig(f.app, bad); err == nil || !strings.Contains(err.Error(), "SMTP_PORT") {
+			t.Fatalf("SMTP_PORT=%s: want a port error, got %v", port, err)
+		}
+	}
+	if err := applyMailConfig(f.app, cfg); err != nil {
+		t.Fatal(err)
+	}
+	st := f.app.Settings()
+	if !st.SMTP.Enabled || st.SMTP.Host != "smtp.example.com" || st.SMTP.Port != 465 || st.Meta.SenderAddress != "whereis@example.com" || st.Meta.AppURL != "https://whereis.example.com" {
+		t.Fatalf("settings not applied: %+v %+v", st.SMTP, st.Meta)
+	}
+
+	run(t, f, tests.ApiScenario{
+		Name: "reset email", Method: http.MethodPost,
+		URL:            "/api/collections/users/request-password-reset",
+		Body:           strings.NewReader(`{"email":"ann@example.com"}`),
+		ExpectedStatus: 204,
+		AfterTestFunc: func(t testing.TB, app *tests.TestApp, res *http.Response) {
+			// the email is sent in the background after the response
+			for i := 0; i < 50 && app.TestMailer.TotalSend() == 0; i++ {
+				time.Sleep(20 * time.Millisecond)
+			}
+			if app.TestMailer.TotalSend() != 1 {
+				t.Fatalf("sent %d emails", app.TestMailer.TotalSend())
+			}
+			m := app.TestMailer.LastMessage()
+			if m.From.Address != "whereis@example.com" || !strings.Contains(m.HTML, "https://whereis.example.com/") {
+				t.Fatalf("from %v, body %s", m.From, m.HTML)
+			}
+		},
+	})
+}
+
+// fakeOAuth stands in for Google: the code sent by the app is the email
+// address the "provider" vouches for.
+type fakeOAuth struct{ auth.BaseProvider }
+
+func (p *fakeOAuth) FetchToken(code string, _ ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
+	return &oauth2.Token{AccessToken: code}, nil
+}
+
+func (p *fakeOAuth) FetchAuthUser(t *oauth2.Token) (*auth.AuthUser, error) {
+	return &auth.AuthUser{Id: "id-" + t.AccessToken, Email: t.AccessToken, Name: "Someone"}, nil
+}
+
+func TestSignupClosedRefusesNewOAuthAccounts(t *testing.T) {
+	auth.Providers["whereis-test"] = func() auth.Provider { return &fakeOAuth{} }
+	defer delete(auth.Providers, "whereis-test")
+
+	for _, closed := range []bool{false, true} {
+		app, err := tests.NewTestApp(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		Register(app, Config{SignupClosed: closed})
+		users, _ := app.FindCollectionByNameOrId("users")
+		users.OAuth2.Enabled = true
+		users.OAuth2.Providers = append(users.OAuth2.Providers, core.OAuth2ProviderConfig{Name: "whereis-test", ClientId: "id", ClientSecret: "secret"})
+		if err := app.Save(users); err != nil {
+			t.Fatal(err)
+		}
+		f := &fixture{app: app}
+		f.user(t, "ann@example.com", "")
+
+		signIn := func(email string) string {
+			return `{"provider":"whereis-test","code":"` + email + `","codeVerifier":"v","redirectURL":"https://example.com/cb"}`
+		}
+		newStatus, newBody := 200, `"token"`
+		if closed {
+			newStatus, newBody = 403, "New accounts are turned off"
+		}
+		run(t, f, tests.ApiScenario{
+			Name: fmt.Sprintf("closed=%v: existing account signs in with the provider", closed), Method: http.MethodPost,
+			URL:  "/api/collections/users/auth-with-oauth2",
+			Body: strings.NewReader(signIn("ann@example.com")), ExpectedStatus: 200, ExpectedContent: []string{`"token"`},
+		})
+		run(t, f, tests.ApiScenario{
+			Name: fmt.Sprintf("closed=%v: first sign-in of a new person", closed), Method: http.MethodPost,
+			URL:  "/api/collections/users/auth-with-oauth2",
+			Body: strings.NewReader(signIn("new@example.com")), ExpectedStatus: newStatus, ExpectedContent: []string{newBody},
+		})
+		if _, err := app.FindAuthRecordByEmail("users", "new@example.com"); (err == nil) == closed {
+			t.Fatalf("closed=%v: new account exists = %v", closed, err == nil)
+		}
+		app.Cleanup()
+	}
 }

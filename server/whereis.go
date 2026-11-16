@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/pocketbase/dbx"
@@ -25,6 +26,15 @@ type Config struct {
 	// /.well-known/assetlinks.json so tag links open the app directly.
 	AndroidPackage    string
 	AndroidCertSHA256 []string
+	// PublicURL is the address people use to reach the server, such as
+	// https://whereis.example.com. Links in emails (password reset) use it.
+	PublicURL string
+	// Mail is the email server used for password reset emails.
+	Mail MailConfig
+	// SignupClosed stops new accounts (email sign-up and first-time Google
+	// sign-in). Existing accounts still sign in, and a superuser can still
+	// create accounts in the dashboard. Set with ALLOW_SIGNUP=false.
+	SignupClosed bool
 	// AppDownloadURL is where the tag landing page sends people without the app.
 	AppDownloadURL string
 	// WebDir holds the web version of the app (the output of
@@ -41,6 +51,40 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		AndroidPackage:     strings.TrimSpace(getenv("ANDROID_PACKAGE")),
 	}
 	c.WebDir = strings.TrimSpace(getenv("WEB_DIR"))
+	c.PublicURL = strings.TrimRight(strings.TrimSpace(getenv("PUBLIC_URL")), "/")
+	if c.PublicURL == "" {
+		if d := strings.TrimSpace(getenv("WHEREIS_DOMAIN")); d != "" {
+			c.PublicURL = "https://" + d
+		}
+	}
+	c.Mail = MailConfig{
+		Host:        strings.TrimSpace(getenv("SMTP_HOST")),
+		Username:    strings.TrimSpace(getenv("SMTP_USERNAME")),
+		Password:    getenv("SMTP_PASSWORD"),
+		FromAddress: strings.TrimSpace(getenv("MAIL_FROM_ADDRESS")),
+		FromName:    strings.TrimSpace(getenv("MAIL_FROM_NAME")),
+	}
+	if raw := strings.TrimSpace(getenv("SMTP_PORT")); raw == "" {
+		c.Mail.Port = 587
+	} else if port, err := strconv.Atoi(raw); err == nil {
+		c.Mail.Port = port
+	} else {
+		c.Mail.Port = -1 // not a number: refused when the mail settings are applied
+	}
+	switch strings.ToLower(strings.TrimSpace(getenv("SMTP_TLS"))) {
+	case "true", "1", "yes", "on":
+		c.Mail.TLS = true
+	case "false", "0", "no", "off":
+	default:
+		c.Mail.TLS = c.Mail.Port == 465
+	}
+	if c.Mail.FromName == "" {
+		c.Mail.FromName = "Where Is"
+	}
+	switch strings.ToLower(strings.TrimSpace(getenv("ALLOW_SIGNUP"))) {
+	case "false", "0", "no", "off":
+		c.SignupClosed = true
+	}
 	c.AppDownloadURL = strings.TrimSpace(getenv("APP_DOWNLOAD_URL"))
 	if c.AppDownloadURL == "" {
 		c.AppDownloadURL = "https://github.com/ssiuuk/where-is/releases/tag/android-latest"
@@ -56,10 +100,25 @@ func ConfigFromEnv(getenv func(string) string) Config {
 	return c
 }
 
+// MailConfig comes from SMTP_* and MAIL_FROM_* in .env. When Host is empty
+// the server leaves whatever was set in the dashboard alone.
+type MailConfig struct {
+	Host        string
+	Port        int
+	Username    string
+	Password    string
+	TLS         bool // implicit TLS (usually port 465); otherwise STARTTLS is used when offered
+	FromAddress string
+	FromName    string
+}
+
 // Register wires the Where Is routes and hooks into a PocketBase app.
 func Register(app core.App, cfg Config) {
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		if err := applyGoogleConfig(se.App, cfg); err != nil {
+			return err
+		}
+		if err := applyMailConfig(se.App, cfg); err != nil {
 			return err
 		}
 
@@ -70,6 +129,11 @@ func Register(app core.App, cfg Config) {
 		g.POST("/leave", leaveHousehold)
 		g.POST("/invite-code", rotateInviteCode)
 		g.POST("/move", moveItems)
+
+		// public: what the sign-in screen should offer
+		se.Router.GET("/api/whereis/config", func(e *core.RequestEvent) error {
+			return e.JSON(http.StatusOK, map[string]any{"signup": !cfg.SignupClosed})
+		})
 
 		se.Router.GET("/.well-known/assetlinks.json", assetLinks(cfg))
 		if hasWebApp(cfg.WebDir) {
@@ -83,6 +147,21 @@ func Register(app core.App, cfg Config) {
 
 		return se.Next()
 	})
+
+	if cfg.SignupClosed {
+		app.OnRecordCreateRequest("users").BindFunc(func(e *core.RecordRequestEvent) error {
+			if e.HasSuperuserAuth() {
+				return e.Next()
+			}
+			return e.ForbiddenError(errSignupClosed, nil)
+		})
+		app.OnRecordAuthWithOAuth2Request("users").BindFunc(func(e *core.RecordAuthWithOAuth2RequestEvent) error {
+			if e.IsNewRecord {
+				return e.ForbiddenError(errSignupClosed, nil)
+			}
+			return e.Next()
+		})
+	}
 
 	// places and items must only point at records of the same household
 	app.OnRecordCreateRequest("places").BindFunc(checkPlace)
@@ -103,6 +182,8 @@ func hasWebApp(dir string) bool {
 
 // ---------------------------------------------------------------------
 // households
+
+const errSignupClosed = "New accounts are turned off on this server. Ask whoever runs it to create one for you."
 
 var errAlreadyMember = errors.New("You already belong to a household. Leave it in Settings before joining another.")
 
@@ -435,6 +516,38 @@ func moveItems(e *core.RequestEvent) error {
 
 // ---------------------------------------------------------------------
 // Google sign-in
+
+// applyMailConfig copies the .env email and address settings into
+// PocketBase's settings, so password reset emails work without the dashboard.
+func applyMailConfig(app core.App, cfg Config) error {
+	if cfg.PublicURL == "" && cfg.Mail.Host == "" {
+		return nil
+	}
+	settings := app.Settings()
+	if cfg.PublicURL != "" {
+		settings.Meta.AppURL = cfg.PublicURL
+	}
+	if m := cfg.Mail; m.Host != "" {
+		if m.Port < 1 || m.Port > 65535 {
+			return errors.New("SMTP_PORT must be a port number from 1 to 65535, usually 587 or 465")
+		}
+		if m.FromAddress == "" {
+			return errors.New("SMTP_HOST is set but MAIL_FROM_ADDRESS is empty: set the address password reset emails come from")
+		}
+		settings.SMTP.Enabled = true
+		settings.SMTP.Host = m.Host
+		settings.SMTP.Port = m.Port
+		settings.SMTP.Username = m.Username
+		settings.SMTP.Password = m.Password
+		settings.SMTP.TLS = m.TLS
+		settings.Meta.SenderAddress = m.FromAddress
+		settings.Meta.SenderName = m.FromName
+	}
+	if err := app.Save(settings); err != nil {
+		return errors.Join(errors.New("couldn't save the email settings"), err)
+	}
+	return nil
+}
 
 func applyGoogleConfig(app core.App, cfg Config) error {
 	users, err := app.FindCollectionByNameOrId("users")

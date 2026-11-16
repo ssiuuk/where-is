@@ -6,7 +6,7 @@ import { font, space, useColors } from '@/components/theme';
 import { Body, Button, Card, ConfirmRow, ErrorText, Field, Heading } from '@/components/ui';
 import { errorMessage } from '@/lib/client';
 import { useData } from '@/lib/data';
-import { useMember } from '@/lib/session';
+import { PasswordChangedError, useMember } from '@/lib/session';
 
 export default function Settings() {
   const c = useColors();
@@ -16,6 +16,8 @@ export default function Settings() {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [confirm, setConfirm] = useState<'' | 'code' | 'leave'>('');
+  const [pw, setPw] = useState<null | { current: string; next: string; done: boolean }>(null);
+  const [pwError, setPwError] = useState('');
 
   const act = async (what: string, fn: () => Promise<unknown>) => {
     setBusy(what);
@@ -92,6 +94,56 @@ export default function Settings() {
         <Heading>You</Heading>
         <Body>{s.user.name || s.user.email}</Body>
         {s.user.email ? <Body muted>{s.user.email}</Body> : null}
+        {pw && !pw.done ? (
+          <View style={{ gap: space.sm }}>
+            <Field
+              label="Current password"
+              value={pw.current}
+              onChangeText={(current) => setPw({ ...pw, current })}
+              secureTextEntry
+              autoComplete="current-password"
+              hint="Signed up with Google? Sign out, then use “Forgot password?” to set one."
+            />
+            <Field
+              label="New password"
+              value={pw.next}
+              onChangeText={(next) => setPw({ ...pw, next })}
+              secureTextEntry
+              autoComplete="new-password"
+              hint="At least 8 characters. Your other devices will need to sign in again."
+            />
+            <ErrorText>{pwError}</ErrorText>
+            <View style={{ flexDirection: 'row', gap: space.sm }}>
+              <Button
+                title="Change password"
+                style={{ flex: 1 }}
+                busy={busy === 'password'}
+                disabled={!pw.current || pw.next.length < 8}
+                onPress={async () => {
+                  setBusy('password');
+                  setPwError('');
+                  try {
+                    await s.changePassword(pw.current, pw.next);
+                    setPw({ current: '', next: '', done: true });
+                  } catch (e) {
+                    // signed out: the sign-in screen takes over and says why
+                    if (e instanceof PasswordChangedError) return;
+                    const status = (e as { status?: number }).status;
+                    setPwError(status === 400 ? 'The current password is wrong, or the new one is too short.' : errorMessage(e));
+                  } finally {
+                    setBusy('');
+                  }
+                }}
+              />
+              <Button kind="secondary" title="Cancel" style={{ flex: 1 }} onPress={() => setPw(null)} />
+            </View>
+          </View>
+        ) : (
+          <>
+            {pw?.done ? <Body muted>Password changed.</Body> : null}
+            <Button kind="secondary" title="Change password" onPress={() => setPw({ current: '', next: '', done: false })} />
+          </>
+        )}
         <Button kind="secondary" title="Sign out" onPress={s.signOut} />
         {confirm === 'leave' ? (
           <ConfirmRow

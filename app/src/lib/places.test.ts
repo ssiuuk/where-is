@@ -45,3 +45,24 @@ test('resolvePlaceInput reuses existing places, ignoring case', () => {
   assert.deepEqual(resolvePlaceInput(places, ['Loft', 'Box']), { parentId: '', toCreate: ['Loft', 'Box'] });
   assert.deepEqual(resolvePlaceInput(places, ['Blue box'], 'shelf2'), { parentId: 'box', toCreate: [] });
 });
+
+test('adding inside an existing place', () => {
+  // a new child of Shelf 2
+  assert.deepEqual(resolvePlaceInput(places, ['Red box'], 'shelf2'), { parentId: 'shelf2', toCreate: ['Red box'] });
+  // a path under Garage: Shelf 2 exists there, Top tray doesn't
+  assert.deepEqual(resolvePlaceInput(places, parsePlaceInput('shelf 2 > Top tray'), 'garage'), {
+    parentId: 'shelf2',
+    toCreate: ['Top tray'],
+  });
+  // the same name under a different parent is a different place
+  assert.deepEqual(resolvePlaceInput(places, ['Blue box'], 'garage'), { parentId: 'garage', toCreate: ['Blue box'] });
+  assert.deepEqual(resolvePlaceInput(places, ['Shelf 2'], 'kitchen'), { parentId: 'kitchen', toCreate: ['Shelf 2'] });
+  // typing a name that's already there picks it instead of making a duplicate
+  assert.deepEqual(resolvePlaceInput(places, parsePlaceInput('  BLUE   BOX '), 'shelf2'), { parentId: 'box', toCreate: [] });
+});
+
+test('blank or separator-only input names nothing', () => {
+  assert.deepEqual(parsePlaceInput('   '), []);
+  assert.deepEqual(parsePlaceInput(' > / › '), []);
+  assert.deepEqual(parsePlaceInput('Garage >  > Shelf'), ['Garage', 'Shelf']);
+});
