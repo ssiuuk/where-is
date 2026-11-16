@@ -3,6 +3,7 @@ import { ScrollView } from 'react-native';
 import { NavRow, useAction } from '@/components/admin';
 import { space } from '@/components/theme';
 import { Body, Button, Card, Empty, ErrorText, Heading, Notice } from '@/components/ui';
+import { adminApi } from '@/lib/admin';
 import { useSession } from '@/lib/session';
 
 export default function AdminHome() {
@@ -34,7 +35,14 @@ export default function AdminHome() {
             title="Send confirmation email"
             busy={a.busy === 'verify'}
             onPress={() =>
-              a.run('verify', () => s.pb!.collection('users').requestVerification(s.user!.email), `Sent to ${s.user!.email}. Open the link, then come back here.`)
+              a.run(
+                'verify',
+                async () => {
+                  const r = await adminApi(s.pb!).verifyEmail();
+                  if (r.verified) await s.refresh();
+                },
+                `Sent to ${s.user!.email}. Open the link in the email (look in spam too), then tap "I've confirmed it".`,
+              )
             }
           />
           <Button kind="plain" title="I've confirmed it" onPress={() => s.refresh()} />

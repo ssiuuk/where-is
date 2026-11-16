@@ -89,6 +89,8 @@ export function adminApi(pb: PocketBase) {
   const id = encodeURIComponent;
   return {
     roles: () => get<Roles>('/api/whereis/admin/roles'),
+    /** Sends the confirmation email now; fails with the mail server's error. */
+    verifyEmail: () => post<{ verified: boolean; to?: string }>('/api/whereis/admin/verify-email'),
 
     family: () => get<Family>(F),
     invite: (action: 'new' | 'off' | 'on') => post<Family>(`${F}/invite`, { action }),

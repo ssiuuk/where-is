@@ -135,6 +135,8 @@ MAIL_FROM_NAME=Where Is
 
 Any SMTP server works: your email provider's (for Gmail, use an app password), or a service such as Brevo or Mailgun. The settings in `.env` are applied each time the server starts. Leave `SMTP_HOST` empty to manage them in the dashboard under Settings → Mail settings instead; the dashboard can also send a test email. The link in the email opens a page on your server where the person picks a new password. Until email is set up, a superuser can set anyone's password in the dashboard: Collections → users → open the person → type a new password → Save. People who signed up with Google have no password; they can keep using Google, or set one with **Forgot password?**.
 
+Every email the server sends prints a line in the container log (`docker compose logs whereis`): `email "…" sent to …` when the mail server took it, or the mail server's error when it didn't. With no mail server set, emails are refused and logged rather than silently dropped. The **Send confirmation email** button for a site admin sends straight away and shows the mail server's error in the app if sending fails.
+
 Every household's places, items and history are only visible to its members. A person belongs to one household at a time: to switch, they leave in Settings first. Item photos are protected files: they are only served with a short-lived file token that the server gives to signed-in members of that household, so a copied photo link stops working within the hour. Who moved an item and when is always set by the server, and an item's move and its history entry are saved together or not at all. This is enforced by the server's API rules (see `server/migrations`) and covered by the tests in `server/whereis_test.go`.
 
 ## Labels

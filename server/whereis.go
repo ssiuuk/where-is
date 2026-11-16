@@ -128,6 +128,8 @@ type MailConfig struct {
 
 // Register wires the Where Is routes and hooks into a PocketBase app.
 func Register(app core.App, cfg Config) {
+	logMail(app)
+
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		if err := applyGoogleConfig(se.App, cfg); err != nil {
 			return err

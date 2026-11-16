@@ -105,6 +105,9 @@ func registerAdminRoutes(se *core.ServeEvent, cfg Config) {
 		})
 	}).Bind(apis.RequireAuth("users"))
 
+	// the confirmation email a listed site admin needs before their tools open
+	se.Router.POST("/api/whereis/admin/verify-email", sendVerifyEmail).Bind(apis.RequireAuth("users"))
+
 	// downloads opened as links
 	dl := se.Router.Group("/api/whereis/admin/download")
 	dl.BindFunc(authFromFileToken)
