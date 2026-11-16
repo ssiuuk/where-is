@@ -153,6 +153,11 @@ func siteMail(cfg Config) func(e *core.RequestEvent) error {
 		if body.Password != nil {
 			s.SMTP.Password = *body.Password
 		}
+		if s.SMTP.Username == "" {
+			// no username: a server that doesn't need a login, so don't keep
+			// sending an old password
+			s.SMTP.Password = ""
+		}
 		s.SMTP.TLS = body.TLS
 		if body.FromAddress != "" {
 			s.Meta.SenderAddress = body.FromAddress
