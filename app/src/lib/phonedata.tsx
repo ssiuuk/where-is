@@ -131,7 +131,7 @@ export function PhoneDataProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<Data>(
     () => ({
-      status, savedAt, places: data.places, items: data.items, members: [], map, tags, label, memberName, photoUrl, reload,
+      status, savedAt, syncing: false, sync: reload, places: data.places, items: data.items, members: [], map, tags, label, memberName, photoUrl, reload,
       addItem, updateItem, moveItems, deleteItem, addPlace, ensurePlace, updatePlace, deletePlace, markLabeled, history,
       carrying, setCarrying,
     }),
