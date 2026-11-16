@@ -21,6 +21,7 @@ type Session = {
   signUp(name: string, email: string, password: string): Promise<void>;
   signInWithGoogle(): Promise<void>;
   googleAvailable(): Promise<boolean>;
+  signupOpen(): Promise<boolean>;
   signOut(): void;
   createHousehold(name: string): Promise<void>;
   joinHousehold(code: string): Promise<void>;
@@ -28,6 +29,8 @@ type Session = {
   newInviteCode(): Promise<void>;
   renameHousehold(name: string): Promise<void>;
   refresh(): Promise<void>;
+  changePassword(current: string, next: string): Promise<void>;
+  requestPasswordReset(email: string): Promise<void>;
 };
 
 const SessionContext = createContext<Session | null>(null);
@@ -187,6 +190,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, [pb]);
 
+  const signupOpen = useCallback(async () => {
+    if (!pb) return false;
+    try {
+      const c = await pb.send<{ signup: boolean }>('/api/whereis/config', {});
+      return c.signup !== false;
+    } catch {
+      return true; // an older server: let it decide
+    }
+  }, [pb]);
+
   const signInWithGoogle = useCallback(async () => {
     const client = need();
     try {
@@ -219,6 +232,26 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     await client.collection('users').authRefresh();
     await adopt(client);
   }, [need, adopt]);
+
+  const changePassword = useCallback(
+    async (current: string, next: string) => {
+      const client = need();
+      const me = client.authStore.record;
+      if (!me) throw new Error('Sign in first.');
+      await client.collection('users').update(me.id, { oldPassword: current, password: next, passwordConfirm: next });
+      // a new password signs out every device, this one included: sign straight back in
+      await client.collection('users').authWithPassword(me.email, next);
+      await adopt(client);
+    },
+    [need, adopt],
+  );
+
+  const requestPasswordReset = useCallback(
+    async (email: string) => {
+      await need().collection('users').requestPasswordReset(email.trim());
+    },
+    [need],
+  );
 
   const createHousehold = useCallback(
     async (name: string) => {
@@ -258,11 +291,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const value = useMemo<Session>(
     () => ({
       ready, serverUrl, pb, user, household,
-      connectServer, forgetServer, signIn, signUp, signInWithGoogle, googleAvailable, signOut,
+      connectServer, forgetServer, signIn, signUp, signInWithGoogle, googleAvailable, signupOpen, signOut,
       createHousehold, joinHousehold, leaveHousehold, newInviteCode, renameHousehold, refresh,
+      changePassword, requestPasswordReset,
     }),
     [ready, serverUrl, pb, user, household, connectServer, forgetServer, signIn, signUp, signInWithGoogle,
-      googleAvailable, signOut, createHousehold, joinHousehold, leaveHousehold, newInviteCode, renameHousehold, refresh],
+      googleAvailable, signupOpen, signOut, createHousehold, joinHousehold, leaveHousehold, newInviteCode, renameHousehold, refresh,
+      changePassword, requestPasswordReset],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

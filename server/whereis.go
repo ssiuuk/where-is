@@ -25,6 +25,10 @@ type Config struct {
 	// /.well-known/assetlinks.json so tag links open the app directly.
 	AndroidPackage    string
 	AndroidCertSHA256 []string
+	// SignupClosed stops new accounts (email sign-up and first-time Google
+	// sign-in). Existing accounts still sign in, and a superuser can still
+	// create accounts in the dashboard. Set with ALLOW_SIGNUP=false.
+	SignupClosed bool
 	// AppDownloadURL is where the tag landing page sends people without the app.
 	AppDownloadURL string
 	// WebDir holds the web version of the app (the output of
@@ -41,6 +45,10 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		AndroidPackage:     strings.TrimSpace(getenv("ANDROID_PACKAGE")),
 	}
 	c.WebDir = strings.TrimSpace(getenv("WEB_DIR"))
+	switch strings.ToLower(strings.TrimSpace(getenv("ALLOW_SIGNUP"))) {
+	case "false", "0", "no", "off":
+		c.SignupClosed = true
+	}
 	c.AppDownloadURL = strings.TrimSpace(getenv("APP_DOWNLOAD_URL"))
 	if c.AppDownloadURL == "" {
 		c.AppDownloadURL = "https://github.com/ssiuuk/where-is/releases/tag/android-latest"
@@ -71,6 +79,11 @@ func Register(app core.App, cfg Config) {
 		g.POST("/invite-code", rotateInviteCode)
 		g.POST("/move", moveItems)
 
+		// public: what the sign-in screen should offer
+		se.Router.GET("/api/whereis/config", func(e *core.RequestEvent) error {
+			return e.JSON(http.StatusOK, map[string]any{"signup": !cfg.SignupClosed})
+		})
+
 		se.Router.GET("/.well-known/assetlinks.json", assetLinks(cfg))
 		if hasWebApp(cfg.WebDir) {
 			// the web app handles /, /p/<id>, /i/<id> and its other screens itself
@@ -83,6 +96,21 @@ func Register(app core.App, cfg Config) {
 
 		return se.Next()
 	})
+
+	if cfg.SignupClosed {
+		app.OnRecordCreateRequest("users").BindFunc(func(e *core.RecordRequestEvent) error {
+			if e.HasSuperuserAuth() {
+				return e.Next()
+			}
+			return e.ForbiddenError(errSignupClosed, nil)
+		})
+		app.OnRecordAuthWithOAuth2Request("users").BindFunc(func(e *core.RecordAuthWithOAuth2RequestEvent) error {
+			if e.IsNewRecord {
+				return e.ForbiddenError(errSignupClosed, nil)
+			}
+			return e.Next()
+		})
+	}
 
 	// places and items must only point at records of the same household
 	app.OnRecordCreateRequest("places").BindFunc(checkPlace)
@@ -103,6 +131,8 @@ func hasWebApp(dir string) bool {
 
 // ---------------------------------------------------------------------
 // households
+
+const errSignupClosed = "New accounts are turned off on this server. Ask whoever runs it to create one for you."
 
 var errAlreadyMember = errors.New("You already belong to a household. Leave it in Settings before joining another.")
 

@@ -99,7 +99,15 @@ The app and the web version show **Continue with Google** as soon as the server 
 
 ### Who can get in
 
-Anyone who can reach the server can create an account, but an account sees nothing until it joins a household with that household's invite code. A wrong code is rate-limited. To stop new accounts entirely, open the dashboard, go to Collections → users → API Rules and set the **Create** rule to superusers only. Then create each person's account in the dashboard.
+Anyone who can reach the server can create an account, but an account sees nothing until it joins a household with that household's invite code. A wrong code is rate-limited.
+
+To stop new accounts once your family has signed up, set `ALLOW_SIGNUP=false` in `.env` and run `docker compose up -d`. Sign-up then disappears from the app, and both email sign-up and a first-time Google sign-in are refused. Everyone who already has an account still signs in as before. To add someone later, create their account in the dashboard under Collections → users (or turn sign-up back on for a moment).
+
+### Passwords
+
+People change their password under **Settings → You → Change password**. Doing so signs them out on their other devices.
+
+**Forgot password?** on the sign-in screen emails a reset link, so it only works once the server can send email: in the dashboard, open Settings → Mail settings and fill in an SMTP server (for example your email provider's, or a service such as Brevo or Mailgun). Until then, a superuser can set anyone's password in the dashboard: Collections → users → open the person → type a new password → Save. People who signed up with Google have no password; they can keep using Google, or set one with **Forgot password?**.
 
 Every household's places, items and history are only visible to its members. A person belongs to one household at a time: to switch, they leave in Settings first. Item photos are protected files: they are only served with a short-lived file token that the server gives to signed-in members of that household, so a copied photo link stops working within the hour. Who moved an item and when is always set by the server, and an item's move and its history entry are saved together or not at all. This is enforced by the server's API rules (see `server/migrations`) and covered by the tests in `server/whereis_test.go`.
 

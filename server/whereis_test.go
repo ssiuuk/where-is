@@ -632,3 +632,58 @@ func TestPhotosArePrivate(t *testing.T) {
 		ExpectedContent: []string{"PNG"},
 	})
 }
+
+func TestSignupSwitch(t *testing.T) {
+	if !ConfigFromEnv(func(k string) string { return map[string]string{"ALLOW_SIGNUP": "false"}[k] }).SignupClosed {
+		t.Fatal("ALLOW_SIGNUP=false should close sign-up")
+	}
+	if ConfigFromEnv(func(string) string { return "" }).SignupClosed {
+		t.Fatal("sign-up should be open by default")
+	}
+
+	signup := `{"email":"new@example.com","password":"password123","passwordConfirm":"password123"}`
+	open := newFixture(t)
+	defer open.app.Cleanup()
+	run(t, open, tests.ApiScenario{
+		Name: "open: config", Method: http.MethodGet, URL: "/api/whereis/config",
+		ExpectedStatus: 200, ExpectedContent: []string{`"signup":true`},
+	})
+	run(t, open, tests.ApiScenario{
+		Name: "open: sign up", Method: http.MethodPost, URL: "/api/collections/users/records",
+		Body: strings.NewReader(signup), ExpectedStatus: 200,
+	})
+
+	app, err := tests.NewTestApp(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Cleanup()
+	Register(app, Config{SignupClosed: true})
+	closed := &fixture{app: app}
+	closed.user(t, "ann@example.com", "")
+	run(t, closed, tests.ApiScenario{
+		Name: "closed: config", Method: http.MethodGet, URL: "/api/whereis/config",
+		ExpectedStatus: 200, ExpectedContent: []string{`"signup":false`},
+	})
+	run(t, closed, tests.ApiScenario{
+		Name: "closed: sign up refused", Method: http.MethodPost, URL: "/api/collections/users/records",
+		Body: strings.NewReader(signup), ExpectedStatus: 403, ExpectedContent: []string{"New accounts are turned off"},
+	})
+	run(t, closed, tests.ApiScenario{
+		Name: "closed: existing account still signs in", Method: http.MethodPost,
+		URL:  "/api/collections/users/auth-with-password",
+		Body: strings.NewReader(`{"identity":"ann@example.com","password":"password123"}`), ExpectedStatus: 200,
+	})
+	suCol, _ := app.FindCollectionByNameOrId(core.CollectionNameSuperusers)
+	su := core.NewRecord(suCol)
+	su.SetEmail("admin@example.com")
+	su.SetPassword("password123")
+	if err := app.Save(su); err != nil {
+		t.Fatal(err)
+	}
+	run(t, closed, tests.ApiScenario{
+		Name: "closed: superuser can still create accounts", Method: http.MethodPost, URL: "/api/collections/users/records",
+		Headers: map[string]string{"Authorization": token(t, su)},
+		Body:    strings.NewReader(signup), ExpectedStatus: 200,
+	})
+}
