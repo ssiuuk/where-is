@@ -17,6 +17,7 @@ import (
 	"github.com/pocketbase/pocketbase/tools/mailer"
 	"github.com/pocketbase/pocketbase/tools/routine"
 	"github.com/pocketbase/pocketbase/tools/security"
+	"github.com/pocketbase/pocketbase/tools/subscriptions"
 )
 
 // ---------------------------------------------------------------------
@@ -416,23 +417,31 @@ func siteUpdateUser(cfg Config) func(e *core.RequestEvent) error {
 				}
 			}
 		}
+		// found before saving: the new token key makes PocketBase sign these
+		// connections out, after which they no longer show whose they were
+		live := realtimeClientsOf(e.App, u.Id)
 		if err := e.App.Save(u); err != nil {
 			return e.InternalServerError("Couldn't save the account.", err)
 		}
 		if body.Disabled != nil && *body.Disabled {
-			dropRealtime(e.App, u.Id)
+			for _, c := range live {
+				c.Discard()
+			}
 		}
 		return e.NoContent(http.StatusNoContent)
 	}
 }
 
-// dropRealtime closes the live-update connections of a turned-off account.
-func dropRealtime(app core.App, userID string) {
+// realtimeClientsOf lists the live-update connections signed in as userID,
+// so a turned-off or deleted account's can be closed.
+func realtimeClientsOf(app core.App, userID string) []subscriptions.Client {
+	var out []subscriptions.Client
 	for _, c := range app.SubscriptionsBroker().Clients() {
 		if auth, ok := c.Get(apis.RealtimeClientAuthKey).(*core.Record); ok && auth.Id == userID {
-			c.Discard()
+			out = append(out, c)
 		}
 	}
+	return out
 }
 
 func siteDeleteUser(cfg Config) func(e *core.RequestEvent) error {
@@ -441,6 +450,9 @@ func siteDeleteUser(cfg Config) func(e *core.RequestEvent) error {
 		if err != nil {
 			return err
 		}
+		// found before deleting: PocketBase signs these connections out when
+		// the account goes, after which they no longer show whose they were
+		live := realtimeClientsOf(e.App, u.Id)
 		err = e.App.RunInTransaction(func(tx core.App) error {
 			if err := handOverIfOwner(tx, u); err != nil {
 				return err
@@ -449,6 +461,10 @@ func siteDeleteUser(cfg Config) func(e *core.RequestEvent) error {
 		})
 		if err != nil {
 			return e.InternalServerError("Couldn't delete the account.", err)
+		}
+		// close them, rather than leave them connected as signed-out guests
+		for _, c := range live {
+			c.Discard()
 		}
 		return e.NoContent(http.StatusNoContent)
 	}

@@ -9,9 +9,11 @@ import (
 	"testing"
 
 	"github.com/pocketbase/dbx"
+	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 	"github.com/pocketbase/pocketbase/tools/filesystem"
+	"github.com/pocketbase/pocketbase/tools/subscriptions"
 )
 
 // adminFixture: Ann owns household 1 (family admin), Ben is a member, and
@@ -692,4 +694,36 @@ func TestDeleteFailsIfPhotoCantBeKept(t *testing.T) {
 		Name: "delete with the file already gone", Method: http.MethodDelete, URL: "/api/collections/items/records/" + f.drill.Id,
 		Headers: asUser(t, f.ben), ExpectedStatus: 204,
 	})
+}
+
+// liveClient registers a realtime connection signed in as u.
+func liveClient(f *fixture, u *core.Record) *subscriptions.DefaultClient {
+	c := subscriptions.NewDefaultClient()
+	c.Set(apis.RealtimeClientAuthKey, u)
+	f.app.SubscriptionsBroker().Register(c)
+	return c
+}
+
+func TestTurnedOffOrDeletedAccountsLoseLiveUpdates(t *testing.T) {
+	f := adminFixture(t)
+	defer f.app.Cleanup()
+	ann, cat, ben := liveClient(f, f.ann), liveClient(f, f.cat), liveClient(f, f.ben)
+
+	run(t, f, tests.ApiScenario{
+		Name: "delete Cat", Method: http.MethodDelete, URL: "/api/whereis/admin/site/users/" + f.cat.Id,
+		Headers: asUser(t, f.dan), ExpectedStatus: 204,
+	})
+	if !cat.IsDiscarded() {
+		t.Fatal("the deleted account's live connection is still open")
+	}
+	run(t, f, tests.ApiScenario{
+		Name: "turn off Ann", Method: http.MethodPatch, URL: "/api/whereis/admin/site/users/" + f.ann.Id,
+		Headers: asUser(t, f.dan), Body: strings.NewReader(`{"disabled":true}`), ExpectedStatus: 204,
+	})
+	if !ann.IsDiscarded() {
+		t.Fatal("the turned-off account's live connection is still open")
+	}
+	if ben.IsDiscarded() {
+		t.Fatal("someone else's live connection was closed")
+	}
 }
