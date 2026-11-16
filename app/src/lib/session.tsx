@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as WebBrowser from 'expo-web-browser';
 import PocketBase from 'pocketbase';
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
@@ -7,6 +8,7 @@ import { adminApi, noRoles, Roles } from './admin';
 import { createClient, savedServer, saveServer } from './client';
 import { normalizeServerUrl } from './links';
 import { changePasswordAndSignIn, PasswordChangedError } from './password';
+import { PHONE_HOUSEHOLD, PHONE_USER } from './phonestore';
 
 export { PasswordChangedError };
 import type { Household } from './types';
@@ -15,6 +17,11 @@ export type SessionUser = { id: string; name: string; email: string; household: 
 
 type Session = {
   ready: boolean;
+  /** No server: everything is kept on this phone (see phonedata.tsx). */
+  phoneOnly: boolean;
+  startPhoneOnly(): Promise<void>;
+  /** Leaves "this phone only" to choose a server. What's on the phone stays, ready to upload. */
+  stopPhoneOnly(): Promise<void>;
   serverUrl: string;
   pb: PocketBase | null;
   user: SessionUser | null;
@@ -63,9 +70,15 @@ export function useSession(): Session {
 /** Narrows the session to a signed-in member of a household. */
 export function useMember() {
   const s = useSession();
-  if (!s.pb || !s.user || !s.household) throw new Error('useMember needs a household');
-  return { ...s, pb: s.pb, user: s.user, household: s.household };
+  if (!s.user || !s.household) throw new Error('useMember needs a household');
+  return { ...s, user: s.user, household: s.household };
 }
+
+const PHONE_KEY = 'whereis.phoneOnly';
+const PHONE_NAME_KEY = 'whereis.phone.name';
+const phoneUser: SessionUser = { id: PHONE_USER, name: 'You', email: '', household: PHONE_HOUSEHOLD, collectionId: '', avatar: '' };
+const phoneHousehold = (name: string): Household => ({ id: PHONE_HOUSEHOLD, name: name || 'My things', invite_code: '', owner: PHONE_USER });
+const read = (key: string) => AsyncStorage.getItem(key).catch(() => null);
 
 function toUser(model: Record<string, unknown> | null): SessionUser | null {
   if (!model) return null;
@@ -81,6 +94,7 @@ function toUser(model: Record<string, unknown> | null): SessionUser | null {
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
+  const [phoneOnly, setPhoneOnly] = useState(false);
   const [serverUrl, setServerUrl] = useState('');
   const [pb, setPb] = useState<PocketBase | null>(null);
   const [user, setUser] = useState<SessionUser | null>(null);
@@ -131,6 +145,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (!webServerUrl && (await read(PHONE_KEY)) === '1') {
+        const name = (await read(PHONE_NAME_KEY)) ?? '';
+        if (cancelled) return;
+        setPhoneOnly(true);
+        setUser(phoneUser);
+        setHousehold(phoneHousehold(name));
+        setReady(true);
+        return;
+      }
       const url = webServerUrl || (await savedServer());
       if (url) {
         const client = await createClient(url);
@@ -180,6 +203,33 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setHousehold(null);
   }, [pb]);
+
+  const startPhoneOnly = useCallback(async () => {
+    await AsyncStorage.setItem(PHONE_KEY, '1');
+    const name = (await read(PHONE_NAME_KEY)) ?? '';
+    pb?.realtime.unsubscribe().catch(() => {});
+    setPb(null);
+    setServerUrl('');
+    setRoles(noRoles);
+    setPhoneOnly(true);
+    setUser(phoneUser);
+    setHousehold(phoneHousehold(name));
+  }, [pb]);
+
+  const stopPhoneOnly = useCallback(async () => {
+    await AsyncStorage.removeItem(PHONE_KEY);
+    setPhoneOnly(false);
+    setUser(null);
+    setHousehold(null);
+    // back to the last server, if there was one
+    const url = await savedServer();
+    if (url) {
+      const client = await createClient(url);
+      setServerUrl(url);
+      setPb(client);
+      if (client.authStore.isValid) await adopt(client);
+    }
+  }, [adopt]);
 
   const need = useCallback(() => {
     if (!pb) throw new Error('Choose a server first.');
@@ -327,20 +377,25 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const renameHousehold = useCallback(
     async (name: string) => {
       if (!household) return;
+      if (phoneOnly) {
+        await AsyncStorage.setItem(PHONE_NAME_KEY, name.trim());
+        setHousehold(phoneHousehold(name.trim()));
+        return;
+      }
       const h = await need().collection('households').update<Household>(household.id, { name: name.trim() });
       setHousehold(h);
     },
-    [need, household],
+    [need, household, phoneOnly],
   );
 
   const value = useMemo<Session>(
     () => ({
-      ready, serverUrl, pb, user, household, roles, refreshRoles,
+      ready, phoneOnly, startPhoneOnly, stopPhoneOnly, serverUrl, pb, user, household, roles, refreshRoles,
       connectServer, forgetServer, signIn, signUp, signInWithGoogle, googleAvailable, signupOpen, signOut,
       createHousehold, joinHousehold, leaveHousehold, newInviteCode, renameHousehold, refresh,
       changePassword, requestPasswordReset, notice,
     }),
-    [ready, serverUrl, pb, user, household, roles, refreshRoles, connectServer, forgetServer, signIn, signUp, signInWithGoogle,
+    [ready, phoneOnly, startPhoneOnly, stopPhoneOnly, serverUrl, pb, user, household, roles, refreshRoles, connectServer, forgetServer, signIn, signUp, signInWithGoogle,
       googleAvailable, signupOpen, signOut, createHousehold, joinHousehold, leaveHousehold, newInviteCode, renameHousehold, refresh,
       changePassword, requestPasswordReset, notice],
   );

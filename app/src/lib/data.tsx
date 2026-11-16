@@ -11,9 +11,9 @@ import type { Item, Member, Move, Place } from './types';
 
 export type Photo = { uri: string; mimeType?: string };
 
-type Status = 'loading' | 'live' | 'offline';
+type Status = 'loading' | 'live' | 'offline' | 'phone';
 
-type Data = {
+export type Data = {
   status: Status;
   savedAt: string;
   places: Place[];
@@ -52,7 +52,7 @@ type Data = {
   setCarrying(itemId: string): void;
 };
 
-const DataContext = createContext<Data | null>(null);
+export const DataContext = createContext<Data | null>(null);
 
 export function useData(): Data {
   const d = useContext(DataContext);
@@ -86,7 +86,7 @@ type Cache = { places: Place[]; items: Item[]; members: Member[]; savedAt: strin
 
 type Fields = Record<string, string | string[]>;
 
-async function photoForm(fields: Fields, photo: Photo): Promise<FormData> {
+export async function photoForm(fields: Fields, photo: Photo): Promise<FormData> {
   const form = new FormData();
   // lists go as JSON text, which the server reads back as a list
   for (const [k, v] of Object.entries(fields)) form.append(k, typeof v === 'string' ? v : JSON.stringify(v));

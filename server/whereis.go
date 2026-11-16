@@ -159,6 +159,7 @@ func Register(app core.App, cfg Config) {
 		g.POST("/leave", leaveHousehold)
 		g.POST("/invite-code", rotateInviteCode)
 		g.POST("/move", moveItems)
+		g.POST("/import-phone", importPhone)
 
 		// public: what the sign-in screen should offer
 		se.Router.GET("/api/whereis/config", func(e *core.RequestEvent) error {

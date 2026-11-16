@@ -50,6 +50,12 @@ test('builds label links', () => {
   assert.equal(tagUrl('https://whereis.example.com/', 'p', id), `https://whereis.example.com/p/${id}`);
 });
 
+test('labels made with no server use the app link, which still reads after moving to a server', () => {
+  assert.equal(tagUrl('', 'p', id), `whereis://p/${id}`);
+  assert.deepEqual(parseTagUrl(tagUrl('', 'i', id), ''), { kind: 'i', id });
+  assert.deepEqual(parseTagUrl(tagUrl('', 'p', id), 'https://whereis.example.com'), { kind: 'p', id });
+});
+
 test('tidies server addresses', () => {
   assert.equal(normalizeServerUrl(' whereis.example.com/ '), 'https://whereis.example.com');
   assert.equal(normalizeServerUrl('http://192.168.1.10:8090'), 'http://192.168.1.10:8090');

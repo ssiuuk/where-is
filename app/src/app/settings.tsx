@@ -7,10 +7,17 @@ import { font, space, useColors } from '@/components/theme';
 import { Body, Button, Card, ConfirmRow, ErrorText, Field, Heading } from '@/components/ui';
 import { errorMessage } from '@/lib/client';
 import { useData } from '@/lib/data';
-import { PasswordChangedError, useMember } from '@/lib/session';
+import { PhoneSettings } from '@/components/PhoneSettings';
+import { PhoneUpload } from '@/components/PhoneUpload';
+import { PasswordChangedError, useMember, useSession } from '@/lib/session';
 import { PartialSyncError, syncStatusText } from '@/lib/sync';
 
 export default function Settings() {
+  const { phoneOnly } = useSession();
+  return phoneOnly ? <PhoneSettings /> : <ServerSettings />;
+}
+
+function ServerSettings() {
   const c = useColors();
   const s = useMember();
   const data = useData();
@@ -88,6 +95,7 @@ export default function Settings() {
   return (
     <ScrollView contentContainerStyle={{ padding: space.lg, gap: space.md }} keyboardShouldPersistTaps="handled">
       <ErrorText>{error}</ErrorText>
+      <PhoneUpload />
       <Card>
         <Heading>Household</Heading>
         <Field value={name} onChangeText={setName} accessibilityLabel="Household name" />

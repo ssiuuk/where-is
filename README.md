@@ -23,6 +23,12 @@ Open your server's address (for example `https://whereis.example.com`) in any br
 
 When someone scans a label with their phone's own camera, the link opens the place in the browser. On Android phones with the app installed, an **Open in the app** button takes them to the app.
 
+## Use it with no server (this phone only)
+
+On the phone app's first screen, **Use on this phone only** skips the server. Everything is kept on the phone: items, places, tags, photos, move history, QR labels and NFC stickers, and printing. There is no account, no family sharing and no admin panel. Uninstalling the app or losing the phone loses everything, so use **Settings → Save a backup file** now and then (one JSON file, photos included); **Restore from a backup file** brings it back.
+
+To start sharing, use **Settings → Move to a server**, connect and sign in, and create or join a household. The app then offers to upload everything from the phone, with its history and photos. Records keep their ids, so labels and stickers made on the phone keep working. Labels made with no server hold the app's own link (`whereis://p/<id>`), so they open in the app but not from a phone's camera app on a phone without Where Is.
+
 ## Install the app (Android)
 
 1. Every push to `main` that changes the app builds it with GitHub Actions (workflow **Build Android App**, which can also be started by hand from the Actions tab to rebuild `main`).

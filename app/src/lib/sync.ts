@@ -1,7 +1,8 @@
 import { timeAgo } from './time.ts';
 
 /** The line under "Sync now" in Settings. */
-export function syncStatusText(s: { syncing: boolean; status: 'loading' | 'live' | 'offline'; savedAt: string }, now: Date = new Date()): string {
+export function syncStatusText(s: { syncing: boolean; status: 'loading' | 'live' | 'offline' | 'phone'; savedAt: string }, now: Date = new Date()): string {
+  if (s.status === 'phone') return 'Kept on this phone only, with no server to sync with.';
   if (s.syncing) return 'Syncing with the server…';
   const ago = timeAgo(s.savedAt, now);
   const at = s.savedAt ? new Date(s.savedAt.replace(' ', 'T')) : null;

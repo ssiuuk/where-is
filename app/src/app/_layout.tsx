@@ -5,6 +5,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useColors } from '@/components/theme';
 import { DataProvider } from '@/lib/data';
+import { PhoneDataProvider } from '@/lib/phonedata';
 import { SessionProvider, useSession } from '@/lib/session';
 
 export default function RootLayout() {
@@ -19,7 +20,7 @@ export default function RootLayout() {
 
 function Navigator() {
   const c = useColors();
-  const { ready, pb, user, household } = useSession();
+  const { ready, pb, user, household, phoneOnly } = useSession();
 
   if (!ready) {
     return (
@@ -29,7 +30,7 @@ function Navigator() {
     );
   }
 
-  const stage = !pb || !user ? 'welcome' : !household ? 'household' : 'app';
+  const stage = phoneOnly ? 'app' : !pb || !user ? 'welcome' : !household ? 'household' : 'app';
 
   const stack = (
     <>
@@ -63,7 +64,7 @@ function Navigator() {
           <Stack.Screen name="admin/stats" options={{ title: 'Stats' }} />
         </Stack.Protected>
         {/* site admin tools work with or without a household */}
-        <Stack.Protected guard={stage !== 'welcome'}>
+        <Stack.Protected guard={stage !== 'welcome' && !phoneOnly}>
           <Stack.Screen name="admin/index" options={{ title: 'Admin' }} />
           <Stack.Screen name="admin/accounts" options={{ title: 'Accounts' }} />
           <Stack.Screen name="admin/server" options={{ title: 'Server settings' }} />
@@ -79,6 +80,7 @@ function Navigator() {
     </>
   );
 
+  if (phoneOnly) return <PhoneDataProvider>{stack}</PhoneDataProvider>;
   return stage === 'app' && pb && household ? (
     <DataProvider key={household.id} pb={pb} household={household.id}>
       {stack}
