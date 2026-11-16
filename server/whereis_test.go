@@ -2,6 +2,9 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"github.com/pocketbase/pocketbase/tools/auth"
+	"golang.org/x/oauth2"
 
 	"github.com/pocketbase/dbx"
 	"net/http"
@@ -707,6 +710,17 @@ func TestMailFromEnv(t *testing.T) {
 	if err := applyMailConfig(f.app, Config{Mail: MailConfig{Host: "smtp.example.com"}}); err == nil {
 		t.Fatal("a mail server without a from address should be refused")
 	}
+	for _, port := range []string{"0", "-25", "70000", "smtp"} {
+		bad := ConfigFromEnv(func(k string) string {
+			if k == "SMTP_PORT" {
+				return port
+			}
+			return env[k]
+		})
+		if err := applyMailConfig(f.app, bad); err == nil || !strings.Contains(err.Error(), "SMTP_PORT") {
+			t.Fatalf("SMTP_PORT=%s: want a port error, got %v", port, err)
+		}
+	}
 	if err := applyMailConfig(f.app, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -734,4 +748,59 @@ func TestMailFromEnv(t *testing.T) {
 			}
 		},
 	})
+}
+
+// fakeOAuth stands in for Google: the code sent by the app is the email
+// address the "provider" vouches for.
+type fakeOAuth struct{ auth.BaseProvider }
+
+func (p *fakeOAuth) FetchToken(code string, _ ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
+	return &oauth2.Token{AccessToken: code}, nil
+}
+
+func (p *fakeOAuth) FetchAuthUser(t *oauth2.Token) (*auth.AuthUser, error) {
+	return &auth.AuthUser{Id: "id-" + t.AccessToken, Email: t.AccessToken, Name: "Someone"}, nil
+}
+
+func TestSignupClosedRefusesNewOAuthAccounts(t *testing.T) {
+	auth.Providers["whereis-test"] = func() auth.Provider { return &fakeOAuth{} }
+	defer delete(auth.Providers, "whereis-test")
+
+	for _, closed := range []bool{false, true} {
+		app, err := tests.NewTestApp(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		Register(app, Config{SignupClosed: closed})
+		users, _ := app.FindCollectionByNameOrId("users")
+		users.OAuth2.Enabled = true
+		users.OAuth2.Providers = append(users.OAuth2.Providers, core.OAuth2ProviderConfig{Name: "whereis-test", ClientId: "id", ClientSecret: "secret"})
+		if err := app.Save(users); err != nil {
+			t.Fatal(err)
+		}
+		f := &fixture{app: app}
+		f.user(t, "ann@example.com", "")
+
+		signIn := func(email string) string {
+			return `{"provider":"whereis-test","code":"` + email + `","codeVerifier":"v","redirectURL":"https://example.com/cb"}`
+		}
+		newStatus, newBody := 200, `"token"`
+		if closed {
+			newStatus, newBody = 403, "New accounts are turned off"
+		}
+		run(t, f, tests.ApiScenario{
+			Name: fmt.Sprintf("closed=%v: existing account signs in with the provider", closed), Method: http.MethodPost,
+			URL:  "/api/collections/users/auth-with-oauth2",
+			Body: strings.NewReader(signIn("ann@example.com")), ExpectedStatus: 200, ExpectedContent: []string{`"token"`},
+		})
+		run(t, f, tests.ApiScenario{
+			Name: fmt.Sprintf("closed=%v: first sign-in of a new person", closed), Method: http.MethodPost,
+			URL:  "/api/collections/users/auth-with-oauth2",
+			Body: strings.NewReader(signIn("new@example.com")), ExpectedStatus: newStatus, ExpectedContent: []string{newBody},
+		})
+		if _, err := app.FindAuthRecordByEmail("users", "new@example.com"); (err == nil) == closed {
+			t.Fatalf("closed=%v: new account exists = %v", closed, err == nil)
+		}
+		app.Cleanup()
+	}
 }

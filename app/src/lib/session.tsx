@@ -30,8 +30,18 @@ type Session = {
   renameHousehold(name: string): Promise<void>;
   refresh(): Promise<void>;
   changePassword(current: string, next: string): Promise<void>;
+  /** A message for the sign-in screen, e.g. after a password change signed this device out. */
+  notice: string;
   requestPasswordReset(email: string): Promise<void>;
 };
+
+/** The new password was saved, but signing back in with it failed. */
+export class PasswordChangedError extends Error {
+  constructor() {
+    super('Your password was changed, but signing back in failed. Sign in with your new password.');
+    this.name = 'PasswordChangedError';
+  }
+}
 
 const SessionContext = createContext<Session | null>(null);
 
@@ -76,6 +86,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [pb, setPb] = useState<PocketBase | null>(null);
   const [user, setUser] = useState<SessionUser | null>(null);
   const [household, setHousehold] = useState<Household | null>(null);
+  const [notice, setNotice] = useState('');
 
   const loadHousehold = useCallback(async (client: PocketBase, u: SessionUser | null) => {
     if (!u?.household) {
@@ -165,6 +176,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     async (email: string, password: string) => {
       const client = need();
       await client.collection('users').authWithPassword(email.trim(), password);
+      setNotice('');
       await adopt(client);
     },
     [need, adopt],
@@ -240,8 +252,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (!me) throw new Error('Sign in first.');
       await client.collection('users').update(me.id, { oldPassword: current, password: next, passwordConfirm: next });
       // a new password signs out every device, this one included: sign straight back in
-      await client.collection('users').authWithPassword(me.email, next);
-      await adopt(client);
+      try {
+        await client.collection('users').authWithPassword(me.email, next);
+        await adopt(client);
+      } catch {
+        // the password did change; only signing back in failed (e.g. the network dropped)
+        const err = new PasswordChangedError();
+        setNotice(err.message);
+        client.authStore.clear();
+        setUser(null);
+        setHousehold(null);
+        throw err;
+      }
     },
     [need, adopt],
   );
@@ -293,11 +315,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       ready, serverUrl, pb, user, household,
       connectServer, forgetServer, signIn, signUp, signInWithGoogle, googleAvailable, signupOpen, signOut,
       createHousehold, joinHousehold, leaveHousehold, newInviteCode, renameHousehold, refresh,
-      changePassword, requestPasswordReset,
+      changePassword, requestPasswordReset, notice,
     }),
     [ready, serverUrl, pb, user, household, connectServer, forgetServer, signIn, signUp, signInWithGoogle,
       googleAvailable, signupOpen, signOut, createHousehold, joinHousehold, leaveHousehold, newInviteCode, renameHousehold, refresh,
-      changePassword, requestPasswordReset],
+      changePassword, requestPasswordReset, notice],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

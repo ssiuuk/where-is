@@ -6,7 +6,7 @@ import { font, space, useColors } from '@/components/theme';
 import { Body, Button, Card, ConfirmRow, ErrorText, Field, Heading } from '@/components/ui';
 import { errorMessage } from '@/lib/client';
 import { useData } from '@/lib/data';
-import { useMember } from '@/lib/session';
+import { PasswordChangedError, useMember } from '@/lib/session';
 
 export default function Settings() {
   const c = useColors();
@@ -126,6 +126,8 @@ export default function Settings() {
                     await s.changePassword(pw.current, pw.next);
                     setPw({ current: '', next: '', done: true });
                   } catch (e) {
+                    // signed out: the sign-in screen takes over and says why
+                    if (e instanceof PasswordChangedError) return;
                     const status = (e as { status?: number }).status;
                     setPwError(status === 400 ? 'The current password is wrong, or the new one is too short.' : errorMessage(e));
                   } finally {
