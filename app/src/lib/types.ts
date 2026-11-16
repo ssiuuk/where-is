@@ -15,6 +15,10 @@ export type Item = {
   household: string;
   name: string;
   note: string;
+  /** labels for grouping, stored in lower case, like "tools" or "christmas" */
+  tags: string[];
+  /** other names the family uses for it, found by search like the name */
+  aliases: string[];
   photo: string; // file name, "" when there is none
   place: string; // "" when nobody knows yet
   moved_by: string;

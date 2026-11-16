@@ -409,6 +409,23 @@ func mergeItem(tx core.App, keep, src *core.Record) error {
 			keep.Set("photo", f)
 		}
 	}
+	// tags and aliases of both are kept (tidied and de-duplicated on save)
+	for field, max := range map[string]int{"tags": maxTags, "aliases": maxAliases} {
+		var a, b []string
+		_ = keep.UnmarshalJSONField(field, &a)
+		_ = src.UnmarshalJSONField(field, &b)
+		seen := map[string]bool{}
+		var both []string
+		for _, v := range append(a, b...) {
+			if k := normName(v); k != "" && !seen[k] && len(both) < max {
+				seen[k] = true
+				both = append(both, v)
+			}
+		}
+		if len(b) > 0 {
+			keep.Set(field, both)
+		}
+	}
 	if err := tx.Save(keep); err != nil {
 		return err
 	}

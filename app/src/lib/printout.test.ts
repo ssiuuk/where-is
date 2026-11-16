@@ -6,7 +6,7 @@ import type { Item, Place } from './types.ts';
 
 const place = (id: string, name: string, parent = ''): Place => ({ id, household: 'h', name, note: '', parent, updated: '' });
 const item = (id: string, name: string, p: string, note = ''): Item => ({
-  id, household: 'h', name, note, photo: '', place: p, moved_by: '', moved_at: '', updated: '', collectionId: '',
+  id, household: 'h', name, note, photo: '', place: p, moved_by: '', moved_at: '', updated: '', collectionId: '', tags: [], aliases: [],
 });
 
 test('items are grouped under their place paths, in tree order', () => {

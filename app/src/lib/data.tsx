@@ -3,6 +3,7 @@ import PocketBase, { RecordModel, RecordSubscription } from 'pocketbase';
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 
+import { asNames, tagCounts } from './names';
 import { parsePlaceInput, PlaceMap, placeLabel, placeMap, resolvePlaceInput } from './places';
 import type { Item, Member, Move, Place } from './types';
 
@@ -21,8 +22,10 @@ type Data = {
   memberName(id: string): string;
   photoUrl(item: Item, thumb?: '200x200' | '800x0'): string;
   reload(): Promise<void>;
-  addItem(input: { name: string; note?: string; place: string; photo?: Photo | null }): Promise<Item>;
-  updateItem(id: string, patch: Partial<Pick<Item, 'name' | 'note' | 'place'>>, photo?: Photo | null): Promise<Item>;
+  /** every tag in use in the household, most used first */
+  tags: { tag: string; count: number }[];
+  addItem(input: { name: string; note?: string; tags?: string[]; aliases?: string[]; place: string; photo?: Photo | null }): Promise<Item>;
+  updateItem(id: string, patch: Partial<Pick<Item, 'name' | 'note' | 'place' | 'tags' | 'aliases'>>, photo?: Photo | null): Promise<Item>;
   moveItems(ids: string[], placeId: string): Promise<void>;
   deleteItem(id: string): Promise<void>;
   addPlace(name: string, parent: string): Promise<Place>;
@@ -52,8 +55,12 @@ function pick<T>(r: RecordModel, keys: (keyof T)[]): T {
   return out as T;
 }
 const toPlace = (r: RecordModel) => pick<Place>(r, ['id', 'household', 'name', 'note', 'parent', 'updated', 'label_at', 'nfc_at']);
-const toItem = (r: RecordModel) =>
-  pick<Item>(r, ['id', 'household', 'name', 'note', 'photo', 'place', 'moved_by', 'moved_at', 'updated', 'collectionId']);
+const toItem = (r: RecordModel): Item => ({
+  ...pick<Item>(r, ['id', 'household', 'name', 'note', 'photo', 'place', 'moved_by', 'moved_at', 'updated', 'collectionId']),
+  // null on items saved before tags existed, and missing from older offline copies
+  tags: asNames(r.tags),
+  aliases: asNames(r.aliases),
+});
 const toMember = (r: RecordModel) => pick<Member>(r, ['id', 'name', 'email', 'avatar', 'collectionId']);
 
 function upsert<T extends { id: string }>(list: T[], rec: T): T[] {
@@ -66,9 +73,12 @@ function upsert<T extends { id: string }>(list: T[], rec: T): T[] {
 
 type Cache = { places: Place[]; items: Item[]; members: Member[]; savedAt: string };
 
-async function photoForm(fields: Record<string, string>, photo: Photo): Promise<FormData> {
+type Fields = Record<string, string | string[]>;
+
+async function photoForm(fields: Fields, photo: Photo): Promise<FormData> {
   const form = new FormData();
-  for (const [k, v] of Object.entries(fields)) form.append(k, v);
+  // lists go as JSON text, which the server reads back as a list
+  for (const [k, v] of Object.entries(fields)) form.append(k, typeof v === 'string' ? v : JSON.stringify(v));
   const type = photo.mimeType || 'image/jpeg';
   const ext = type.split('/')[1] || 'jpg';
   if (Platform.OS === 'web') {
@@ -103,7 +113,7 @@ export function DataProvider({ pb, household, children }: { pb: PocketBase; hous
         if (cancelled || !raw || loaded.current) return;
         const c = JSON.parse(raw) as Cache;
         setPlaces(c.places);
-        setItems(c.items);
+        setItems(c.items.map((i) => toItem(i as unknown as RecordModel)));
         setMembers(c.members);
         setSavedAt(c.savedAt);
       })
@@ -177,6 +187,7 @@ export function DataProvider({ pb, household, children }: { pb: PocketBase; hous
   }, [places, items, members, savedAt, cacheKey]);
 
   const map = useMemo(() => placeMap(places), [places]);
+  const tags = useMemo(() => tagCounts(items), [items]);
   const label = useCallback((id: string) => (id ? placeLabel(map, id) : ''), [map]);
   const memberName = useCallback(
     (id: string) => {
@@ -218,8 +229,8 @@ export function DataProvider({ pb, household, children }: { pb: PocketBase; hous
   );
 
   const addItem = useCallback<Data['addItem']>(
-    async ({ name, note = '', place, photo }) => {
-      const fields = { household, name: name.trim(), note: note.trim(), place };
+    async ({ name, note = '', tags = [], aliases = [], place, photo }) => {
+      const fields = { household, name: name.trim(), note: note.trim(), tags, aliases, place };
       const rec = photo
         ? await pb.collection('items').create(await photoForm(fields, photo))
         : await pb.collection('items').create(fields);
@@ -232,8 +243,8 @@ export function DataProvider({ pb, household, children }: { pb: PocketBase; hous
 
   const updateItem = useCallback<Data['updateItem']>(
     async (id, patch, photo) => {
-      const fields: Record<string, string> = {};
-      for (const [k, v] of Object.entries(patch)) fields[k] = typeof v === 'string' ? v.trim() : '';
+      const fields: Fields = {};
+      for (const [k, v] of Object.entries(patch)) fields[k] = Array.isArray(v) ? v : typeof v === 'string' ? v.trim() : '';
       let rec: RecordModel;
       if (photo) rec = await pb.collection('items').update(id, await photoForm(fields, photo));
       else if (photo === null) rec = await pb.collection('items').update(id, { ...fields, photo: null });
@@ -335,11 +346,11 @@ export function DataProvider({ pb, household, children }: { pb: PocketBase; hous
 
   const value = useMemo<Data>(
     () => ({
-      status, savedAt, places, items, members, map, label, memberName, photoUrl, reload,
+      status, savedAt, places, items, members, map, tags, label, memberName, photoUrl, reload,
       addItem, updateItem, moveItems, deleteItem, addPlace, ensurePlace, updatePlace, deletePlace, markLabeled, history,
       carrying, setCarrying,
     }),
-    [status, savedAt, places, items, members, map, label, memberName, photoUrl, reload,
+    [status, savedAt, places, items, members, map, tags, label, memberName, photoUrl, reload,
       addItem, updateItem, moveItems, deleteItem, addPlace, ensurePlace, updatePlace, deletePlace, markLabeled, history, carrying],
   );
 

@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { searchItems } from './search.ts';
+import { matchedAlias, searchItems, withTag } from './search.ts';
 import type { Item } from './types.ts';
 
-const item = (name: string, note = '', where = '', updated = ''): Item & { where: string } => ({
-  id: name, household: 'h', name, note, photo: '', place: '', moved_by: '', moved_at: '', updated, collectionId: 'c', where,
+const item = (name: string, note = '', where = '', updated = '', tags: string[] = [], aliases: string[] = []): Item & { where: string } => ({
+  id: name, household: 'h', name, note, tags, aliases, photo: '', place: '', moved_by: '', moved_at: '', updated, collectionId: 'c', where,
 });
 const items = [
   item('Passport', 'both of them', 'Bedroom › Drawer', '2026-01-03'),
@@ -36,4 +36,41 @@ test('name matches beat place matches', () => {
 
 test('ignores case and accents', () => {
   assert.deepEqual(names('CAFE'), ['Café receipt']);
+});
+
+test('finds items by another name', () => {
+  const list = [item('Vacuum cleaner', '', 'Hall cupboard', '', [], ['Hoover', 'Dyson']), item('Hose', '', 'Garden')];
+  assert.deepEqual(searchItems(list, 'hoover', where).map((i) => i.name), ['Vacuum cleaner']);
+  assert.deepEqual(searchItems(list, 'ho', where).map((i) => i.name), ['Hose', 'Vacuum cleaner']);
+  assert.equal(matchedAlias(list[0], 'hoover'), 'Hoover');
+  assert.equal(matchedAlias(list[0], 'vacuum'), '');
+});
+
+test('finds items by tag, and # only matches tags', () => {
+  const list = [
+    item('Drill', '', 'Garage', '', ['tools', 'diy']),
+    item('Toolbox manual', '', 'Study'),
+    item('Wreath', '', 'Loft', '', ['christmas']),
+  ];
+  assert.deepEqual(searchItems(list, 'tool', where).map((i) => i.name), ['Toolbox manual', 'Drill']);
+  assert.deepEqual(searchItems(list, '#tool', where).map((i) => i.name), ['Drill']);
+  assert.deepEqual(searchItems(list, '#christmas loft', where).map((i) => i.name), ['Wreath']);
+  assert.deepEqual(withTag(list, 'diy').map((i) => i.name), ['Drill']);
+  assert.equal(withTag(list, '').length, 3);
+});
+
+test('copes with items saved before tags existed', () => {
+  const old = { ...item('Passport'), tags: undefined, aliases: undefined } as unknown as Item;
+  assert.deepEqual(searchItems([old], 'pass', () => '').length, 1);
+});
+
+test('any name match ranks above any alias match, then tags, then notes and places', () => {
+  const list = [
+    item('Note', 'van keys inside'),
+    item('Wrench', '', '', '', ['van']),
+    item('Spare key', '', '', '', [], ['van key']),
+    item('Caravan cover'),
+  ];
+  // "van" is only inside the name "Caravan", but at the start of the other's alias and tag
+  assert.deepEqual(searchItems(list, 'van', where).map((i) => i.name), ['Caravan cover', 'Spare key', 'Wrench', 'Note']);
 });

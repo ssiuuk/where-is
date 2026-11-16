@@ -293,8 +293,8 @@ func TestMergeDuplicates(t *testing.T) {
 	defer f.app.Cleanup()
 	garage2 := f.save(t, "places", map[string]any{"household": f.h1.Id, "name": "garage "})
 	box := f.save(t, "places", map[string]any{"household": f.h1.Id, "name": "Box", "parent": garage2.Id})
-	saw := f.save(t, "items", map[string]any{"household": f.h1.Id, "name": "Saw", "place": garage2.Id, "note": "rusty"})
-	saw2 := f.save(t, "items", map[string]any{"household": f.h1.Id, "name": "saw", "place": f.garage.Id})
+	saw := f.save(t, "items", map[string]any{"household": f.h1.Id, "name": "Saw", "place": garage2.Id, "note": "rusty", "tags": []string{"tools"}, "aliases": []string{"hacksaw"}})
+	saw2 := f.save(t, "items", map[string]any{"household": f.h1.Id, "name": "saw", "place": f.garage.Id, "tags": []string{"tools", "garden"}})
 
 	run(t, f, tests.ApiScenario{
 		Name: "find", Method: http.MethodGet, URL: "/api/whereis/admin/family/duplicates",
@@ -317,8 +317,12 @@ func TestMergeDuplicates(t *testing.T) {
 		Headers: asUser(t, f.ann), Body: strings.NewReader(`{"kind":"items","keep":"` + saw2.Id + `","merge":["` + saw.Id + `"]}`),
 		ExpectedStatus: 204,
 	})
-	if s, _ := f.app.FindRecordById("items", saw2.Id); s.GetString("note") != "rusty" {
-		t.Fatalf("note not merged: %q", s.GetString("note"))
+	kept, _ := f.app.FindRecordById("items", saw2.Id)
+	if kept.GetString("note") != "rusty" {
+		t.Fatalf("note not merged: %q", kept.GetString("note"))
+	}
+	if tags, aliases := kept.GetString("tags"), kept.GetString("aliases"); tags != `["tools","garden"]` || aliases != `["hacksaw"]` {
+		t.Fatalf("tags %s, aliases %s", tags, aliases)
 	}
 	if n, _ := f.app.CountRecords("trash", dbx.HashExp{"household": f.h1.Id}); n != 2 {
 		t.Fatalf("%d merged records in the bin, want 2", n)
