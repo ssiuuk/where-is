@@ -170,6 +170,10 @@ func Register(app core.App, cfg Config) {
 
 	app.OnRecordCreateRequest("items").BindFunc(trackMove)
 	app.OnRecordUpdateRequest("items").BindFunc(trackMove)
+
+	// tags and aliases are tidied on every save, from any client
+	app.OnRecordCreate("items").BindFunc(tidyItemNames)
+	app.OnRecordUpdate("items").BindFunc(tidyItemNames)
 }
 
 func hasWebApp(dir string) bool {
