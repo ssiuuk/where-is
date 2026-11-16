@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ItemRow } from '@/components/ItemRow';
 import { Chip } from '@/components/NamesField';
 import { OfflineNotice } from '@/components/OfflineNotice';
+import { PhoneUpload } from '@/components/PhoneUpload';
 import { font, space, useColors } from '@/components/theme';
 import { Button, Empty, Field, Icon, IconButton } from '@/components/ui';
 import { useData } from '@/lib/data';
@@ -71,6 +72,7 @@ export default function Find() {
           </ScrollView>
         ) : null}
         <OfflineNotice />
+        <PhoneUpload />
       </View>
       <FlatList
         data={results}

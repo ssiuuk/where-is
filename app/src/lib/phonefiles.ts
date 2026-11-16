@@ -4,7 +4,7 @@
 
 import { Directory, File, Paths } from 'expo-file-system';
 
-import { asPhoneData, emptyPhoneData, newId, PhoneData } from './phonestore';
+import { asPhoneData, Backup, emptyPhoneData, makeBackup, newId, parseBackup, PhoneData } from './phonestore';
 
 const root = () => new Directory(Paths.document, 'phone');
 const dataFile = () => new File(root(), 'data.json');
@@ -75,4 +75,43 @@ export async function writePhoto(name: string, base64: string): Promise<void> {
   if (f.exists) f.delete();
   f.create();
   await f.write(base64, { encoding: 'base64' });
+}
+
+// ---------------------------------------------------------------------
+// backup file
+
+/** Writes everything, photos included, into one file and returns it to share. */
+export async function writeBackup(name: string): Promise<File> {
+  const data = await loadPhoneData();
+  const photos: Record<string, string> = {};
+  for (const i of data.items) {
+    if (!i.photo) continue;
+    try {
+      photos[i.photo] = await photoBase64(i.photo);
+    } catch {
+      // a photo file that went missing: the rest still gets saved
+    }
+  }
+  const backup = makeBackup(name, data, photos);
+  const day = backup.saved.slice(0, 10);
+  const f = new File(Paths.cache, `where-is-backup-${day}.json`);
+  if (f.exists) f.delete();
+  f.create();
+  await f.write(JSON.stringify(backup));
+  return f;
+}
+
+/** Asks for a backup file and reads it, or returns null if the person cancelled. */
+export async function pickBackup(): Promise<Backup | null> {
+  const picked = await File.pickFileAsync({ mimeTypes: ['application/json', 'text/plain', 'application/octet-stream'] });
+  if (picked.canceled) return null;
+  return parseBackup(await picked.result.text());
+}
+
+/** Replaces what's on the phone with a backup. */
+export async function restoreBackup(backup: Backup): Promise<void> {
+  const dir = photoDir();
+  if (dir.exists) dir.delete();
+  for (const [name, base64] of Object.entries(backup.photos)) await writePhoto(name, base64);
+  await savePhoneData(backup.data);
 }
